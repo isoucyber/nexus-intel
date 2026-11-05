@@ -1,10 +1,10 @@
 name: Release Windows
 
-# Gera o instalador .exe. Roda ao criar uma tag vX.Y.Z (publica a Release)
-# ou manualmente pela aba Actions (gera só o artefato para download).
+# Gera o instalador .exe. Roda ao publicar uma Release com tag vX.Y.Z (e anexa os
+# arquivos a ela) ou manualmente pela aba Actions (gera só o artefato para download).
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
