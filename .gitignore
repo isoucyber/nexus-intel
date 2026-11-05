@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+packaging/nexus.ico
+*.nxdb
+*.nxdb-*
+vault.json
+*.lock
+.idea/
+.vscode/

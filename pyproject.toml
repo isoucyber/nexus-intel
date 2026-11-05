@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nexus-intel"
+version = "0.1.0"
+description = "Central local de conhecimento e análise com proveniência, grafo, mapa e IA com citações."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12"
+authors = [{ name = "Arthur Bomfim" }]
+dependencies = [
+    "cryptography>=44",          # AES-256-GCM, HKDF e Argon2id (substitui argon2-cffi)
+    "pydantic>=2.7",
+    "platformdirs>=4",
+    "sqlcipher3-wheels>=0.5",    # banco cifrado (ver ADR-0003)
+    "PySide6-Essentials>=6.8",   # Qt Widgets; QtWebEngine entra na F2
+    "numpy>=1.26",               # layout do grafo
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-qt>=4.4",
+    "hypothesis>=6",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "import-linter>=2",
+    "pip-audit>=2.7",
+]
+
+[project.scripts]
+nexus-intel = "nexus_intel.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+nexus_intel = ["infrastructure/db/migrations/**/*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+markers = [
+    "sqlcipher: exige sqlcipher3 instalado",
+    "qt: exige PySide6 e display",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "SIM"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/nexus_intel/domain", "src/nexus_intel/application"]
+
+[tool.importlinter]
+root_package = "nexus_intel"
+
+[[tool.importlinter.contracts]]
+name = "Camadas (seção 7.1)"
+type = "layers"
+layers = [
+    "nexus_intel.ui",
+    "nexus_intel.application",
+    "nexus_intel.infrastructure",
+    "nexus_intel.domain",
+]
+ignore_imports = [
+    # A interface lê constantes e o cofre só para validação de senha e modo de cifragem.
+    "nexus_intel.ui.** -> nexus_intel.infrastructure.**",
+]
+
+[[tool.importlinter.contracts]]
+name = "Domínio sem I/O nem Qt"
+type = "forbidden"
+source_modules = ["nexus_intel.domain"]
+forbidden_modules = ["PySide6", "sqlite3", "sqlcipher3", "nexus_intel.infrastructure"]
