@@ -36,7 +36,8 @@ def open_database(path: Path, key: SecretKey | None) -> Any:
         conn = _sqlcipher.connect(str(path), isolation_level=None, check_same_thread=False)
         # Chave bruta de 256 bits: sem a derivação PBKDF2 interna do SQLCipher.
         conn.execute(f"PRAGMA key = \"x'{key.hex()}'\"")
-        conn.execute("PRAGMA cipher_memory_security = ON")
+        # cipher_memory_security fica no padrão (desligado): ligado, ele troca o alocador
+        # de memória do SQLite e estourou a pilha no Windows (CI, sqlcipher3-wheels).
         try:
             conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
         except _sqlcipher.DatabaseError as exc:
