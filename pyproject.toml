@@ -62,6 +62,7 @@ files = ["src/nexus_intel/domain", "src/nexus_intel/application"]
 
 [tool.importlinter]
 root_package = "nexus_intel"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Camadas (seção 7.1)"
