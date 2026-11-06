@@ -222,6 +222,7 @@ class MainWindow(QMainWindow):
 
     def _drop_workspace(self) -> None:
         if self.workspace is not None:
+            self.workspace.shutdown()
             self.stack.removeWidget(self.workspace)
             self.workspace.deleteLater()
             self.workspace = None
@@ -240,6 +241,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: Any) -> None:  # noqa: N802
         try:
+            if self.workspace is not None:
+                self.workspace.shutdown()
             if self.manager:
                 self.manager.close_current()
             self.session.lock()

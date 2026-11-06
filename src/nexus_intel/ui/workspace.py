@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from shiboken6 import isValid
 from PySide6.QtWidgets import (
@@ -671,6 +671,18 @@ class Workspace(QWidget):
         self._current = "home"
         on_theme(self, lambda _t: self._label_section_tab())
         self.go("home" if store.count_entities() else "entities")
+
+    def shutdown(self) -> None:
+        """Silencia sinais e timers antes da destruição (bloqueio, troca de projeto, fechar).
+
+        Sem isso, caixas de seleção destruídas avisam “mudei” e disparam recargas
+        sobre widgets que já não existem.
+        """
+        for obj in [self, *self.findChildren(QObject)]:
+            obj.blockSignals(True)
+            if isinstance(obj, QTimer):
+                obj.stop()
+        self.search.popup.hide()
 
     def _go_to(self, target: str) -> None:
         if target == "entities:new":
