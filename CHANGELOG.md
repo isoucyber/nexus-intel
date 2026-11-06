@@ -2,7 +2,7 @@
 
 Formato baseado em Keep a Changelog; versões seguem SemVer.
 
-## [Não lançado] — Fase 1: design system
+## [0.2.0] — 2026-11-06 — Fase 1: design system
 ### Adicionado
 - Tokens centralizados e 6 temas (Escuro, Claro, OLED preto, Alto contraste, Midnight Blue, Graphite)
   com contraste WCAG AA verificado por teste, inclusive para qualquer cor de destaque.
