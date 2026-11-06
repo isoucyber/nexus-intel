@@ -139,6 +139,7 @@ QAbstractItemView {{
     selection-background-color: {t.selection}; selection-color: {t.selection_text};
 }}
 QAbstractItemView:focus {{ border: 1px solid {t.focus}; }}
+QAbstractItemView[frameless="true"], QAbstractItemView[frameless="true"]:focus {{ border: none; }}
 QAbstractItemView::item {{ padding: {row}px {t.space("sm")}px; border: none; }}
 QAbstractItemView::item:hover {{ background: {t.surface_hover}; }}
 QAbstractItemView::item:selected {{ background: {t.selection}; color: {t.selection_text}; }}

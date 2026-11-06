@@ -111,6 +111,7 @@ class DashboardPage(Page):
                                  Column("type_label", "Tipo", "muted", width=120),
                                  Column("updated_at", "Atualizada", "reltime", width=100)])
         self.recent.row_activated.connect(lambda r: self.open_entity.emit(r["id"]))
+        self.recent.setProperty("frameless", "true")
         recent_card = Card("Atualizadas recentemente", icon="clock",
                            actions=[button("Ver todas", lambda: self.go_to.emit("entities"), "Ghost")])
         recent_card.add(self.recent, 1)

@@ -117,7 +117,7 @@ class SetupPage(Page):
             holder, self.encrypt, label(warn, "Warning", wrap=True),
             label(TERMS, "Muted", wrap=True), self.terms, self.error, hbox(None, create),
         )
-        body.setMaximumWidth(560)
+        body.setFixedWidth(560)
         self.layout_.addStretch(1)
         self.layout_.addWidget(hbox(None, body, None))
         self.layout_.addStretch(1)
@@ -190,7 +190,7 @@ class LoginPage(Page):
         self.recovery_hint.hide()
         body = card(label("NEXUS INTEL", "Brand"), self.title, holder, self.recovery_hint,
                     self.recovery, self.error, hbox(self.toggle, None, self.go))
-        body.setMaximumWidth(460)
+        body.setFixedWidth(440)
         self.layout_.addStretch(1)
         self.layout_.addWidget(hbox(None, body, None))
         self.layout_.addStretch(1)

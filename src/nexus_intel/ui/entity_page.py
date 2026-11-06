@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QFormLayout,
+    QHBoxLayout,
     QHeaderView,
     QLineEdit,
     QMenu,
@@ -35,11 +36,17 @@ from nexus_intel.ui.common import (
     guarded,
     hbox,
     label,
-    status_text,
 )
 from nexus_intel.ui.dialogs import ClaimDialog, EvidenceDialog, RelationDialog
 from nexus_intel.ui.design import assets, tokens
-from nexus_intel.ui.design.components import Badge, ElidedLabel, EntityAvatar, StatusBadge
+from nexus_intel.ui.design.components import (
+    STATUS_LABELS,
+    Badge,
+    ElidedLabel,
+    EntityAvatar,
+    SectionHeader,
+    StatusBadge,
+)
 
 _ROLE = Qt.ItemDataRole.UserRole
 
@@ -70,11 +77,16 @@ class EntityPage(Page):
         self.subtitle = label("", "Muted")
         self.chips = hbox()
         self.fav = button("", self._toggle_fav, "Ghost", tip="Favoritar", icon="star")
-        self.layout_.addWidget(hbox(self.avatar, self.title, self.fav, None,
-                                    button("Ver no grafo", lambda: self.show_in_graph.emit(self.entity_id),
-                                           icon="network"),
-                                    button("Arquivar", self._archive, icon="archive"),
-                                    button("Lixeira", self._trash, "Danger", icon="trash-2"), spacing=10))
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        head.addWidget(self.avatar)
+        head.addWidget(self.title, 1)
+        head.addWidget(self.fav)
+        head.addSpacing(12)
+        head.addWidget(button("Ver no grafo", lambda: self.show_in_graph.emit(self.entity_id), icon="network"))
+        head.addWidget(button("Arquivar", self._archive, icon="archive"))
+        head.addWidget(button("Lixeira", self._trash, "Danger", icon="trash-2"))
+        self.layout_.addLayout(head)
         self.layout_.addWidget(self.subtitle)
         self.layout_.addWidget(self.chips)
 
@@ -162,9 +174,9 @@ class EntityPage(Page):
     def _build_claims(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
-        lay.addWidget(hbox(label("Cada valor tem sua própria fonte e status. Valores conflitantes ficam "
-                                 "lado a lado; nada é apagado.", "Muted", wrap=True), None,
-                           button("+ Atributo", self._add_claim, "Primary")))
+        lay.addWidget(SectionHeader("", "Cada valor tem sua própria fonte e status. Valores conflitantes "
+                                    "ficam lado a lado; nada é apagado.",
+                                    [button("Atributo", self._add_claim, "Primary", icon="plus")], role="h3"))
         self.claims = QTreeWidget()
         self.claims.setHeaderLabels(["Campo / valor", "Status", "Fontes", "Validade", "Observação"])
         self.claims.setAlternatingRowColors(True)
@@ -184,7 +196,10 @@ class EntityPage(Page):
         for g in self.store.claims_for(self.entity_id):
             if not g.claims and not show_empty:
                 continue
-            parent = QTreeWidgetItem([g.field_def["label"] + ("  ⚠ conflito" if g.has_conflict else "")])
+            parent = QTreeWidgetItem([g.field_def["label"] + ("  ·  conflito" if g.has_conflict else "")])
+            if g.has_conflict:
+                parent.setIcon(0, assets.icon("triangle-alert", tokens.current().danger, 14))
+                parent.setForeground(0, assets.qcolor(tokens.current().danger))
             parent.setData(0, _ROLE, {"field_key": g.field_def["key"]})
             font = parent.font(0)
             font.setBold(True)
@@ -203,7 +218,7 @@ class EntityPage(Page):
                     if c["valid_from"] or c["valid_to"] else ""
                 child = QTreeWidgetItem([
                     cv.display_value + (f"   ({', '.join(flags)})" if flags else ""),
-                    status_text(status),
+                    STATUS_LABELS.get(status, status),
                     str(cv.evidence_count) if cv.evidence_count else "sem fonte",
                     validity, c["note"],
                 ])
@@ -288,9 +303,9 @@ class EntityPage(Page):
     def _build_relations(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
-        lay.addWidget(hbox(label("Linha contínua no grafo = verificada; tracejada = relatada; "
-                                 "pontilhada = hipótese; vermelha = conflitante.", "Muted", wrap=True),
-                           None, button("+ Relação", self._add_relation, "Primary")))
+        lay.addWidget(SectionHeader("", "No grafo: linha contínua = verificada; tracejada = relatada; "
+                                    "pontilhada = hipótese; vermelha = conflitante.",
+                                    [button("Relação", self._add_relation, "Primary", icon="plus")], role="h3"))
         self.relations = QTreeWidget()
         self.relations.setHeaderLabels(["Relação", "Entidade", "Status", "Fontes", "Validade", "Descrição"])
         self.relations.setRootIsDecorated(False)
@@ -311,7 +326,7 @@ class EntityPage(Page):
         t = tokens.current()
         for r in self.store.relations_for(self.entity_id):
             validity = f"{r['valid_from'] or ''} – {r['valid_to'] or 'atual'}" if r["valid_from"] or r["valid_to"] else ""
-            it = QTreeWidgetItem([r["phrase"], r["other_name"], status_text(r["epistemic_status"]),
+            it = QTreeWidgetItem([r["phrase"], r["other_name"], STATUS_LABELS.get(r["epistemic_status"], ""),
                                   str(r["ev_count"]) if r["ev_count"] else "sem fonte", validity, r["description"]])
             st_color = t.status_color(r["epistemic_status"])
             it.setForeground(2, assets.qcolor(st_color))

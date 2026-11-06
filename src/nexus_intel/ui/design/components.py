@@ -100,6 +100,7 @@ class Button(QPushButton):
         if size != "md":
             self.setProperty("size", size)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)  # anel de foco só ao navegar pelo teclado
         tip = tooltip or ""
         if shortcut:
             tip = f"{tip}  ({shortcut})".strip() if tip else shortcut
@@ -142,6 +143,7 @@ class IconButton(QToolButton):
         self.setAccessibleName(tooltip)
         self.setCheckable(checkable)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.setIconSize(QSize(size, size))
         if on_click is not None:
             self.clicked.connect(lambda *_: on_click())
@@ -454,7 +456,8 @@ class SectionHeader(QWidget):
         col = QVBoxLayout()
         col.setSpacing(2)
         self.title = ElidedLabel(title, role)
-        col.addWidget(self.title)
+        if title:
+            col.addWidget(self.title)
         if subtitle:
             self.subtitle = text(subtitle, "muted", wrap=True)
             col.addWidget(self.subtitle)
