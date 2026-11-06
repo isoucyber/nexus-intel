@@ -1241,13 +1241,13 @@ class ProjectStore:
             "claims": one("SELECT count(*) AS n FROM claim"),
             "trashed": one("SELECT count(*) AS n FROM entity WHERE record_status='trashed'"),
             "by_type": self._all(
-                "SELECT t.label, coalesce(t.color,'#888') AS color, count(e.id) AS n FROM entity_type t"
+                "SELECT t.key AS type_key, t.label, count(e.id) AS n FROM entity_type t"
                 " LEFT JOIN entity e ON e.type_id=t.id AND e.record_status='active'"
                 " GROUP BY t.id HAVING n > 0 ORDER BY n DESC"),
             "by_status": self._all(
                 "SELECT epistemic_status, count(*) AS n FROM claim GROUP BY epistemic_status"),
             "recent": self._all(
-                "SELECT e.id, e.display_name, t.label AS type_label, e.updated_at FROM entity e"
+                "SELECT e.id, e.display_name, t.label AS type_label, t.key AS type_key, e.updated_at FROM entity e"
                 " JOIN entity_type t ON t.id=e.type_id WHERE e.record_status='active'"
                 " ORDER BY e.updated_at DESC LIMIT 10"),
         }

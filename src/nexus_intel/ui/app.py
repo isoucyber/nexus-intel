@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import logging
 import sys
 from typing import Any
@@ -28,12 +30,13 @@ from nexus_intel.infrastructure.paths import AppPaths, default_paths
 from nexus_intel.ui.auth import ChangePasswordDialog, LoginPage, RecoveryKeyDialog, SetupPage
 from nexus_intel.ui.common import button, confirm, guarded, hbox, label, show_error
 from nexus_intel.ui.projects_page import ProjectsPage
-from nexus_intel.ui.theme import THEMES, stylesheet
+from nexus_intel.ui.design import tokens
+from nexus_intel.ui.design.manager import apply_appearance
 from nexus_intel.ui.workspace import Workspace
 
 log = logging.getLogger("nexus_intel")
 
-DEFAULTS = {"theme": "nexus", "font_scale": 1.0, "idle_minutes": 10}
+DEFAULTS: dict[str, Any] = {"idle_minutes": 10}
 
 THIRD_PARTY = (
     "Qt / PySide6 — LGPL-3.0 · cryptography — Apache-2.0/BSD · SQLCipher — BSD · "
@@ -68,14 +71,15 @@ class SettingsDialog(QDialog):
         s = win.session
         self.setWindowTitle("Configurações")
         self.setMinimumWidth(520)
+        current = win.appearance()
         self.theme = QComboBox()
-        for k, t in THEMES.items():
-            self.theme.addItem(t["label"], k)
-        self.theme.setCurrentIndex(self.theme.findData(win.pref("theme")))
+        for k, t in tokens.THEMES.items():
+            self.theme.addItem(t.label, k)
+        self.theme.setCurrentIndex(self.theme.findData(current.theme))
         self.scale = QDoubleSpinBox()
-        self.scale.setRange(0.85, 1.5)
+        self.scale.setRange(0.9, 1.25)
         self.scale.setSingleStep(0.05)
-        self.scale.setValue(float(win.pref("font_scale")))
+        self.scale.setValue(current.scale)
         self.idle = QSpinBox()
         self.idle.setRange(1, 240)
         self.idle.setSuffix(" min")
@@ -107,8 +111,8 @@ class SettingsDialog(QDialog):
                 RecoveryKeyDialog(key, self).exec()
 
     def accept(self) -> None:
-        self.win.set_pref("theme", self.theme.currentData())
-        self.win.set_pref("font_scale", round(self.scale.value(), 2))
+        self.win.set_appearance(replace(self.win.appearance(), theme=self.theme.currentData(),
+                                        scale=round(self.scale.value(), 2)))
         self.win.set_pref("idle_minutes", self.idle.value())
         self.win.apply_prefs()
         super().accept()
@@ -136,7 +140,7 @@ class MainWindow(QMainWindow):
         self.idle = IdleWatcher(DEFAULTS["idle_minutes"] * 60_000, self.lock)
         QApplication.instance().installEventFilter(self.idle)
         QShortcut(QKeySequence("Ctrl+L"), self, activated=self.lock)
-        QApplication.instance().setStyleSheet(stylesheet(DEFAULTS["theme"]))
+        apply_appearance(tokens.Appearance())
         self._show_entry()
 
     # ------------------------------------------------------------ prefs
@@ -148,12 +152,23 @@ class MainWindow(QMainWindow):
     def set_pref(self, key: str, value: Any) -> None:
         self.session.set_setting(key, value)
 
+    def appearance(self) -> tokens.Appearance:
+        """Aparência salva; aceita o formato antigo (theme/font_scale) da v0.1."""
+        if not self.session.unlocked:
+            return tokens.Appearance()
+        data = self.session.get_setting("appearance")
+        if data is None:
+            data = {"theme": self.session.get_setting("theme", tokens.DEFAULT_THEME),
+                    "scale": self.session.get_setting("font_scale", 1.0)}
+        return tokens.Appearance.from_dict(data)
+
+    def set_appearance(self, app: tokens.Appearance) -> None:
+        self.session.set_setting("appearance", app.to_dict())
+
     def apply_prefs(self) -> None:
-        QApplication.instance().setStyleSheet(stylesheet(self.pref("theme"), float(self.pref("font_scale"))))
+        # Aplica ao vivo: componentes e grafo se redesenham sem recriar telas.
+        apply_appearance(self.appearance())
         self.idle.set_timeout(int(self.pref("idle_minutes")) * 60_000)
-        if self.workspace and self.manager and self.manager.current:
-            # Recria a área de trabalho para aplicar o tema ao grafo.
-            self.open_project(self.manager.current.project_id)
 
     # ------------------------------------------------------------ fluxo
     def _show_entry(self) -> None:
@@ -194,7 +209,7 @@ class MainWindow(QMainWindow):
         info = self.manager.get(project_id)
         self._drop_workspace()
         try:
-            self.workspace = Workspace(store, info.name, info.color, self.pref("theme"))
+            self.workspace = Workspace(store, info.name, info.color)
         except Exception as exc:  # noqa: BLE001
             self.manager.close_current()
             show_error(self, exc)
@@ -220,7 +235,7 @@ class MainWindow(QMainWindow):
         self._drop_workspace()
         self.session.lock()  # fecha projeto, banco e apaga chaves
         self.idle.timer.stop()
-        QApplication.instance().setStyleSheet(stylesheet(DEFAULTS["theme"]))
+        apply_appearance(tokens.Appearance())
         self._show_entry()
 
     def closeEvent(self, event: Any) -> None:  # noqa: N802

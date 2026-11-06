@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
 
 from nexus_intel.application.projects import ProjectInfo, ProjectManager
 from nexus_intel.domain.catalog import TEMPLATES
+from nexus_intel.ui.design import tokens
+from nexus_intel.ui.design.color import best_on
 from nexus_intel.ui.common import Page, button, card, confirm, fmt_ts, guarded, hbox, label
 
 TEMPLATE_HINTS = {
@@ -34,7 +36,7 @@ class NewProjectDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Novo projeto")
         self.setMinimumWidth(480)
-        self.color = "#2dd4bf"
+        self.color = tokens.ACCENT_PRESETS["Turquesa"]
         self.name = QLineEdit()
         self.template = QComboBox()
         for k, v in TEMPLATES.items():
@@ -73,7 +75,7 @@ class NewProjectDialog(QDialog):
             self._paint()
 
     def _paint(self) -> None:
-        self.color_btn.setStyleSheet(f"background: {self.color}; color: #000; min-width: 60px;")
+        self.color_btn.setStyleSheet(f"background: {self.color}; color: {best_on(self.color)}; min-width: 60px;")
 
     def accept(self) -> None:
         if self.name.text().strip():
@@ -149,7 +151,8 @@ class ProjectsPage(Page):
             self._create(dlg.name.text(), dlg.template.currentData(), dlg.color,
                          dlg.purpose.toPlainText(), dlg.legal.currentData() or "")
 
-    def _create(self, name: str, template: str, color: str = "#2dd4bf", purpose: str = "", legal: str = "") -> None:
+    def _create(self, name: str, template: str, color: str | None = None, purpose: str = "", legal: str = "") -> None:
+        color = color or tokens.ACCENT_PRESETS["Turquesa"]
         info = guarded(self, lambda: self.manager.create(name, template, color, purpose, legal))
         if info:
             self.open_project.emit(info.id)

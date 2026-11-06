@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QFont, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -31,7 +31,8 @@ from PySide6.QtWidgets import (
 from nexus_intel.application.project_store import ProjectStore
 from nexus_intel.ui.common import Page, button, guarded, hbox, label
 from nexus_intel.ui.dialogs import RelationDialog
-from nexus_intel.ui.theme import STATUS_COLORS, THEMES
+from nexus_intel.ui.design import assets, tokens
+from nexus_intel.ui.design.components import on_theme, paint_avatar
 
 STATUS_PEN = {
     "verified": Qt.PenStyle.SolidLine,
@@ -52,6 +53,7 @@ def force_layout(n: int, edges: list[tuple[int, int]], iterations: int = 250, se
         return np.zeros((1, 2))
     k = 90.0
     temp = math.sqrt(n) * 40
+    gravity = 0.08 * math.sqrt(n)
     e = np.array(edges, dtype=int).reshape(-1, 2)
     for _ in range(iterations):
         delta = pos[:, None, :] - pos[None, :, :]
@@ -64,7 +66,7 @@ def force_layout(n: int, edges: list[tuple[int, int]], iterations: int = 250, se
             f = d / dl * (dl * dl / k)
             np.add.at(disp, e[:, 0], -f)
             np.add.at(disp, e[:, 1], f)
-        disp -= pos * 0.01  # gravidade leve: componentes soltas não fogem
+        disp -= pos * gravity  # componentes desconexas ficam próximas, não fogem da tela
         length = np.linalg.norm(disp, axis=1)[:, None] + 1e-6
         pos += disp / length * np.minimum(length, temp)
         temp *= 0.97
@@ -72,13 +74,13 @@ def force_layout(n: int, edges: list[tuple[int, int]], iterations: int = 250, se
 
 
 class NodeItem(QGraphicsObject):
-    def __init__(self, data: dict[str, Any], view: GraphView, radius: float, fg: str) -> None:
+    def __init__(self, data: dict[str, Any], view: GraphView, radius: float) -> None:
         super().__init__()
         self.data_ = data
         self.view = view
         self.radius = radius
         self.edges: list[EdgeItem] = []
-        self.color = QColor(data["color"] or "#94a3b8")
+        t = tokens.current()
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable
                       | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
                       | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
@@ -87,9 +89,9 @@ class NodeItem(QGraphicsObject):
         self.setZValue(2)
         text = data["display_name"]
         self.text = QGraphicsSimpleTextItem(text if len(text) <= 28 else text[:26] + "…", self)
-        self.text.setBrush(QColor(fg))
-        f = QFont()
-        f.setPointSizeF(8.5)
+        self.text.setBrush(assets.qcolor(t.graph_label))
+        f = QFont(assets.font_family("ui"))
+        f.setPixelSize(max(10, t.font_px("xs") - 1))
         self.text.setFont(f)
         br = self.text.boundingRect()
         self.text.setPos(-br.width() / 2, radius + 3)
@@ -99,21 +101,15 @@ class NodeItem(QGraphicsObject):
         return QRectF(-r, -r, 2 * r, 2 * r)
 
     def paint(self, p: QPainter, _opt: Any, _w: Any = None) -> None:
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self.isSelected() or self.data_["id"] == self.view.center_id:
-            p.setPen(QPen(QColor("#ffffff") if self.isSelected() else self.color.lighter(150), 3))
-        else:
-            p.setPen(QPen(self.color.darker(160), 1.5))
-        p.setBrush(QBrush(self.color))
-        p.drawEllipse(QPointF(0, 0), self.radius, self.radius)
-        initial = (self.data_["type_label"] or "?")[0]
-        p.setPen(QColor("#0b1220"))
-        f = p.font()
-        f.setBold(True)
-        f.setPointSizeF(max(7.0, self.radius * 0.6))
-        p.setFont(f)
-        p.drawText(QRectF(-self.radius, -self.radius, 2 * self.radius, 2 * self.radius),
-                   Qt.AlignmentFlag.AlignCenter, initial)
+        t = tokens.current()
+        ring = None
+        if self.isSelected():
+            ring = t.focus
+        elif self.data_["id"] == self.view.center_id:
+            ring = t.accent
+        r = self.radius
+        paint_avatar(p, QRectF(-r, -r, 2 * r, 2 * r), self.data_.get("type_key") or "other",
+                     ring or t.type_color(self.data_.get("type_key")))
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value: Any) -> Any:
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
@@ -134,9 +130,10 @@ class EdgeItem(QGraphicsPathItem):
         super().__init__()
         self.data_, self.a, self.b = data, a, b
         status = data["epistemic_status"]
-        color = QColor(STATUS_COLORS["conflicting"]) if status == "conflicting" else QColor(base)
-        if status == "verified":
-            color = QColor(STATUS_COLORS["verified"]).darker(115)
+        t = tokens.current()
+        color = assets.qcolor(base)
+        if status in ("conflicting", "verified"):
+            color = assets.qcolor(t.status_color(status), 0.85)
         pen = QPen(color, 2.2 if status == "verified" else 1.6, STATUS_PEN.get(status, Qt.PenStyle.SolidLine))
         self.setPen(pen)
         self.setZValue(1)
@@ -220,13 +217,13 @@ class GraphView(QGraphicsView):
 class GraphPage(Page):
     open_entity = Signal(str)
 
-    def __init__(self, store: ProjectStore, theme: str = "nexus") -> None:
+    def __init__(self, store: ProjectStore) -> None:
         super().__init__()
         self.store = store
-        self.theme = THEMES.get(theme, THEMES["nexus"])
         self.hidden: set[str] = set()
         self.view = GraphView(self)
-        self.view.setBackgroundBrush(QColor(self.theme["graph.bg"]))
+        self.view.setBackgroundBrush(assets.qcolor(tokens.current().graph_bg))
+        on_theme(self, self._retheme)
         self.view.node_activated.connect(self.open_entity.emit)
         self.view.node_selected.connect(self._selected)
 
@@ -263,6 +260,11 @@ class GraphPage(Page):
             "Duplo clique abre a entidade · botão direito: focar, criar relação, ocultar · roda do mouse: zoom · "
             "arraste o fundo para mover. Linha contínua = verificada; tracejada = relatada; "
             "pontilhada = hipótese; vermelha = conflito.", "Muted", wrap=True))
+
+    def _retheme(self, t: tokens.Tokens) -> None:
+        self.view.setBackgroundBrush(assets.qcolor(t.graph_bg))
+        if self.view.scene().items():
+            self.reload(keep_positions=True)
 
     def _selected(self, eid: str) -> None:
         e = guarded(self, lambda: self.store.get_entity(eid))
@@ -313,13 +315,13 @@ class GraphPage(Page):
         items: dict[str, NodeItem] = {}
         for i, n in enumerate(nodes):
             r = 9 + min(14, degree[n["id"]] * 1.5) + n["importance"]
-            it = NodeItem(n, self.view, r, self.theme["fg.primary"])
+            it = NodeItem(n, self.view, r)
             p = old.get(n["id"])
             it.setPos(p if p is not None else QPointF(float(pos[i, 0]), float(pos[i, 1])))
             scene.addItem(it)
             items[n["id"]] = it
         for e in edges:
-            scene.addItem(EdgeItem(e, items[e["source_id"]], items[e["target_id"]], self.theme["graph.edge"]))
+            scene.addItem(EdgeItem(e, items[e["source_id"]], items[e["target_id"]], tokens.current().graph_edge))
         mode = "Foco" if self.view.center_id else "Visão geral"
         trunc = f" (limite atingido: mostrando os {len(nodes)} mais conectados)" if data["truncated"] else ""
         self.info.setText(f"{mode}: {len(nodes)} de {data['total_entities']} entidades · "
@@ -334,7 +336,7 @@ class GraphPage(Page):
         scene = self.view.scene()
         rect = scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         img = QImage(int(rect.width() * 2), int(rect.height() * 2), QImage.Format.Format_ARGB32)
-        img.fill(QColor(self.theme["graph.bg"]))
+        img.fill(assets.qcolor(tokens.current().graph_bg))
         p = QPainter(img)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         scene.render(p, QRectF(img.rect()), rect)

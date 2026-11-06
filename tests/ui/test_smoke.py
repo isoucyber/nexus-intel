@@ -72,9 +72,12 @@ def test_full_flow(win, qtbot):
 
     ws.pages["quality"]._scan()
     s = SettingsDialog(win)
-    s.theme.setCurrentIndex(s.theme.findData("clean"))
+    s.theme.setCurrentIndex(s.theme.findData("claro"))
     s.accept()
-    assert win.pref("theme") == "clean"
+    assert win.appearance().theme == "claro"
+    from nexus_intel.ui.design import tokens
+
+    assert tokens.current().key == "claro"
 
     win.lock()
     assert not win.session.unlocked
@@ -91,8 +94,14 @@ def test_full_flow(win, qtbot):
     assert win.stack.currentWidget() is win.projects_page
 
 
-def test_theme_contrast():
-    from nexus_intel.ui.theme import THEMES, check_theme
+def test_gallery_renders_every_theme(qtbot):
+    from nexus_intel.ui.design import tokens
+    from nexus_intel.ui.design.gallery import Gallery
 
-    for name, t in THEMES.items():
-        assert check_theme(t) == [], name
+    for theme in tokens.THEMES:
+        g = Gallery(theme)
+        qtbot.addWidget(g)
+        g.resize(1200, 800)
+        g.show()
+        assert not g.grab().isNull()
+        assert tokens.current().key == theme

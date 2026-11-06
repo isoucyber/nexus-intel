@@ -35,11 +35,11 @@ from nexus_intel.ui.common import (
     guarded,
     hbox,
     label,
-    status_chip,
     status_text,
 )
 from nexus_intel.ui.dialogs import ClaimDialog, EvidenceDialog, RelationDialog
-from nexus_intel.ui.theme import STATUS_COLORS
+from nexus_intel.ui.design import assets, tokens
+from nexus_intel.ui.design.components import Badge, ElidedLabel, EntityAvatar, StatusBadge
 
 _ROLE = Qt.ItemDataRole.UserRole
 
@@ -50,9 +50,7 @@ def _item(text: str, data: Any = None, color: str | None = None) -> QTableWidget
     if data is not None:
         it.setData(_ROLE, data)
     if color:
-        from PySide6.QtGui import QColor
-
-        it.setForeground(QColor(color))
+        it.setForeground(assets.qcolor(color))
     return it
 
 
@@ -67,14 +65,16 @@ class EntityPage(Page):
         self.entity_id = entity_id
         self.entity: dict[str, Any] = {}
 
-        self.title = label("", "H1")
+        self.avatar = EntityAvatar("other", 40)
+        self.title = ElidedLabel("", "h1")
         self.subtitle = label("", "Muted")
         self.chips = hbox()
-        self.fav = button("☆", self._toggle_fav, tip="Favorito")
-        self.layout_.addWidget(hbox(self.title, self.fav, None,
-                                    button("Ver no grafo", lambda: self.show_in_graph.emit(self.entity_id)),
-                                    button("Arquivar", self._archive),
-                                    button("Lixeira", self._trash, "Danger")))
+        self.fav = button("", self._toggle_fav, "Ghost", tip="Favoritar", icon="star")
+        self.layout_.addWidget(hbox(self.avatar, self.title, self.fav, None,
+                                    button("Ver no grafo", lambda: self.show_in_graph.emit(self.entity_id),
+                                           icon="network"),
+                                    button("Arquivar", self._archive, icon="archive"),
+                                    button("Lixeira", self._trash, "Danger", icon="trash-2"), spacing=10))
         self.layout_.addWidget(self.subtitle)
         self.layout_.addWidget(self.chips)
 
@@ -207,9 +207,9 @@ class EntityPage(Page):
                     str(cv.evidence_count) if cv.evidence_count else "sem fonte",
                     validity, c["note"],
                 ])
-                from PySide6.QtGui import QColor
-
-                child.setForeground(1, QColor(STATUS_COLORS.get(status, "#94a3b8")))
+                st_color = tokens.current().status_color(status)
+                child.setForeground(1, assets.qcolor(st_color))
+                child.setIcon(1, assets.icon(assets.STATUS_ICONS.get(status, "circle"), st_color, 14))
                 child.setData(0, _ROLE, {"claim": c})
                 parent.addChild(child)
             self.claims.addTopLevelItem(parent)
@@ -308,13 +308,14 @@ class EntityPage(Page):
 
     def _fill_relations(self) -> None:
         self.relations.clear()
-        from PySide6.QtGui import QColor
-
+        t = tokens.current()
         for r in self.store.relations_for(self.entity_id):
             validity = f"{r['valid_from'] or ''} – {r['valid_to'] or 'atual'}" if r["valid_from"] or r["valid_to"] else ""
             it = QTreeWidgetItem([r["phrase"], r["other_name"], status_text(r["epistemic_status"]),
                                   str(r["ev_count"]) if r["ev_count"] else "sem fonte", validity, r["description"]])
-            it.setForeground(2, QColor(STATUS_COLORS.get(r["epistemic_status"], "#94a3b8")))
+            st_color = t.status_color(r["epistemic_status"])
+            it.setForeground(2, assets.qcolor(st_color))
+            it.setIcon(2, assets.icon(assets.STATUS_ICONS.get(r["epistemic_status"], "circle"), st_color, 14))
             it.setData(0, _ROLE, r)
             it.setToolTip(1, "Duplo clique para abrir")
             self.relations.addTopLevelItem(it)
@@ -443,11 +444,13 @@ class EntityPage(Page):
             return
         self.entity = e
         self.title.setText(e["display_name"])
-        self.title.setStyleSheet(f"border-left: 5px solid {e['effective_color']}; padding-left: 10px;")
+        self.avatar.set_type(e["type_key"])
+        self.avatar.setToolTip(e["type_label"])
         status = {"active": "", "archived": " · ARQUIVADA", "trashed": " · NA LIXEIRA"}[e["record_status"]]
         self.subtitle.setText(f"{e['type_label']} · importância {e['importance']}{status} · "
                               f"criada {fmt_ts(e['created_at'])} · atualizada {fmt_ts(e['updated_at'])}")
-        self.fav.setText("★" if e["is_favorite"] else "☆")
+        self.fav.setToolTip("Remover dos favoritos" if e["is_favorite"] else "Favoritar")
+        self.fav.setText("Favorito" if e["is_favorite"] else "")
         lay = self.chips.layout()
         while lay.count():
             it = lay.takeAt(0)
@@ -462,11 +465,9 @@ class EntityPage(Page):
                 by_status[st] = by_status.get(st, 0) + 1
         lay.addWidget(label(f"{total} afirmações", "Muted"))
         for st, n in sorted(by_status.items()):
-            chip = status_chip(st)
-            chip.setText(f"{chip.text()}: {n}")
-            lay.addWidget(chip)
-        for t in e["tags"]:
-            lay.addWidget(label(f"#{t}", "Muted"))
+            lay.addWidget(StatusBadge(st, n))
+        for tag in e["tags"]:
+            lay.addWidget(Badge(f"#{tag}", "neutral", "hash"))
         lay.addStretch(1)
 
         self.f_name.setText(e["display_name"])
