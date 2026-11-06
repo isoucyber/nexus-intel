@@ -1,0 +1,51 @@
+name: Capturas de tela
+
+# Fotografa as telas com dados fictícios e publica os PNGs no branch
+# "screenshots", na pasta indicada (ex.: fase1-antes, fase1-depois).
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Pasta de destino no branch screenshots"
+        required: true
+        default: manual
+
+permissions:
+  contents: write
+
+jobs:
+  shots:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar
+        run: python -m pip install -e .
+      - name: Capturar
+        shell: pwsh
+        run: python tools/screenshots.py "$env:RUNNER_TEMP\shots" 1440 900
+      - name: Publicar no branch screenshots
+        shell: bash
+        env:
+          LABEL: ${{ inputs.label }}
+        run: |
+          SHOTS="$(cygpath "$RUNNER_TEMP")/shots"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch --depth 1 origin screenshots; then
+            git checkout -f -B screenshots FETCH_HEAD
+          else
+            git checkout --orphan screenshots
+            git rm -rf -q .
+          fi
+          git clean -fdxq
+          rm -rf "$LABEL" && mkdir -p "$LABEL"
+          cp "$SHOTS"/*.png "$LABEL"/
+          git add "$LABEL"
+          git commit -q -m "Capturas: $LABEL (${GITHUB_SHA::7})"
+          git push -q origin screenshots

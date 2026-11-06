@@ -1,0 +1,67 @@
+name: Baixar ativos de terceiros
+
+# Baixa ícones Lucide (ISC) e fontes Inter e JetBrains Mono (OFL-1.1) do npm,
+# converte as fontes para TTF e publica tudo no branch "vendor-assets".
+# O subconjunto usado pelo app é copiado para src/ manualmente, com as licenças.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Baixar pacotes
+        run: |
+          mkdir -p "$RUNNER_TEMP/pkg" && cd "$RUNNER_TEMP/pkg"
+          npm pack lucide-static @fontsource/inter @fontsource/jetbrains-mono
+          for f in *.tgz; do d="${f%.tgz}"; mkdir -p "$d"; tar -xzf "$f" -C "$d"; done
+          ls -la
+          python -m pip install fonttools brotli
+      - name: Montar pasta
+        shell: python
+        run: |
+          import glob, os, shutil, json
+          from fontTools.ttLib import TTFont
+          pkg = os.path.join(os.environ["RUNNER_TEMP"], "pkg")
+          out = os.path.join(os.environ["RUNNER_TEMP"], "out")
+          os.makedirs(out + "/lucide", exist_ok=True)
+          os.makedirs(out + "/fonts", exist_ok=True)
+          versions = {}
+          for d in glob.glob(pkg + "/*/package"):
+              meta = json.load(open(d + "/package.json"))
+              versions[meta["name"]] = meta["version"]
+              lic = next(iter(glob.glob(d + "/LICENSE*")), None)
+              tag = meta["name"].replace("@fontsource/", "").replace("/", "-")
+              if lic:
+                  shutil.copy(lic, f"{out}/LICENSE-{tag}.txt")
+              if meta["name"] == "lucide-static":
+                  for svg in glob.glob(d + "/icons/*.svg"):
+                      shutil.copy(svg, out + "/lucide/")
+              else:
+                  for w in glob.glob(d + "/files/*-latin-*-normal.woff2"):
+                      base = os.path.basename(w)
+                      if "-ext-" in base:
+                          continue
+                      f = TTFont(w)
+                      f.flavor = None
+                      f.save(out + "/fonts/" + base.replace(".woff2", ".ttf"))
+          json.dump(versions, open(out + "/VERSIONS.json", "w"), indent=2)
+          print(versions, len(os.listdir(out + "/lucide")), "icones", sorted(os.listdir(out + "/fonts")))
+      - name: Publicar branch vendor-assets
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan vendor-assets
+          git rm -rf -q .
+          git clean -fdxq
+          cp -r "$RUNNER_TEMP/out/." .
+          git add -A
+          git commit -q -m "Ativos de terceiros (Lucide, Inter, JetBrains Mono)"
+          git push -f -q origin vendor-assets
