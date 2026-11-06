@@ -11,6 +11,7 @@ SRC = ROOT / "src" / "nexus_intel"
 
 datas = [
     (str(SRC / "infrastructure" / "db" / "migrations"), "nexus_intel/infrastructure/db/migrations"),
+    (str(SRC / "ui" / "assets"), "nexus_intel/ui/assets"),
     (str(ROOT / "LICENSE"), "."),
     (str(ROOT / "THIRD_PARTY_LICENSES.md"), "."),
 ]
@@ -20,7 +21,7 @@ a = Analysis(  # noqa: F821
     pathex=[str(ROOT / "src")],
     binaries=collect_dynamic_libs("sqlcipher3"),
     datas=datas,
-    hiddenimports=["sqlcipher3", "sqlcipher3.dbapi2"],
+    hiddenimports=["sqlcipher3", "sqlcipher3.dbapi2", "PySide6.QtSvg"],
     excludes=["tkinter", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.Qt3DCore",
               "PySide6.QtQuick", "PySide6.QtQml", "PySide6.QtMultimedia", "PySide6.QtPdf"],
     noarchive=False,

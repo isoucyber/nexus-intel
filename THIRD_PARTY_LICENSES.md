@@ -10,6 +10,9 @@
 | Pydantic | MIT | Validação |
 | platformdirs | MIT | Pastas do sistema |
 | NumPy | BSD-3-Clause | Layout do grafo |
+| Inter (fonte) | SIL OFL 1.1 | Fonte da interface. Nomes internos normalizados para agrupar os pesos |
+| JetBrains Mono (fonte) | SIL OFL 1.1 | Fonte monoespaçada para IDs e placas |
+| Lucide (ícones) | ISC | Ícones da interface |
 | Python | PSF License | Runtime empacotado |
 
-Os textos completos das licenças acompanham cada pacote dentro da pasta de instalação.
+Os textos completos das licenças acompanham cada pacote dentro da pasta de instalação. Fontes e ícones: `nexus_intel/ui/assets/LICENSE-*.txt`.

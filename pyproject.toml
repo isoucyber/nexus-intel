@@ -37,7 +37,7 @@ nexus-intel = "nexus_intel.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-nexus_intel = ["infrastructure/db/migrations/**/*.sql"]
+nexus_intel = ["infrastructure/db/migrations/**/*.sql", "ui/assets/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
