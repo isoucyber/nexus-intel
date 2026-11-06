@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from shiboken6 import isValid
+
 from typing import Any
 
 from PySide6.QtCore import Qt
@@ -345,6 +347,8 @@ class ClaimDialog(QDialog):
         return self.fields[self.field.currentIndex()]
 
     def _field_changed(self) -> None:
+        if not isValid(self) or not isValid(self.hint):
+            return
         import json
 
         f = self._current_field()
@@ -374,6 +378,8 @@ class ClaimDialog(QDialog):
             self.hint.show()
 
     def _source_changed(self) -> None:
+        if not isValid(self) or not isValid(self.status):
+            return
         if not self._status_touched:
             self.status.setCurrentIndex(self.status.findData("reported" if self.source.value() else "unverified"))
 
@@ -466,6 +472,8 @@ class RelationDialog(QDialog):
         form.addRow(hbox(None, button("Cancelar", self.reject), button("Salvar", self.accept, "Primary")))
 
     def _source_changed(self) -> None:
+        if not isValid(self) or not isValid(self.status):
+            return
         if not self._status_touched:
             self.status.setCurrentIndex(self.status.findData("reported" if self.source.value() else "unverified"))
 

@@ -6,6 +6,7 @@ from typing import Any
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
+from shiboken6 import isValid
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -221,6 +222,10 @@ class EntitiesPage(Page):
             without_evidence=self.no_source.value(), order=self.order.value(), limit=limit, offset=offset)
 
     def reset(self) -> None:
+        # Caixas de seleção avisam “mudei” enquanto a tela é destruída (ao bloquear):
+        # nesse caso não há o que recarregar.
+        if not isValid(self) or not isValid(self.stack):
+            return
         q = self.filter_text.text().strip()
         if q:
             rows = guarded(self, lambda: self.store.search(q, 500)) or []
@@ -493,7 +498,7 @@ class SearchBox(Input):
         self.setProperty("search", "true")
         self.setMinimumWidth(460)
         self.setToolTip("Buscar ou criar (Ctrl+K)")
-        self.popup = QListWidget()
+        self.popup = QListWidget(self)
         self.popup.setWindowFlags(Qt.WindowType.ToolTip)
         self.popup.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.popup.itemClicked.connect(self._choose)

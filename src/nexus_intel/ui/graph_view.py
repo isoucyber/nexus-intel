@@ -7,6 +7,8 @@ epistêmico, arrastar nós, zoom, menu de contexto e exportação PNG.
 
 from __future__ import annotations
 
+from shiboken6 import isValid
+
 import math
 from typing import Any
 
@@ -288,6 +290,8 @@ class GraphPage(Page):
             self.reload(keep_positions=True)
 
     def reload(self, keep_positions: bool = False) -> None:
+        if not isValid(self) or not isValid(self.view):
+            return  # sinal emitido durante a destruição da tela
         old = {}
         if keep_positions:
             old = {i.data_["id"]: i.pos() for i in self.view.scene().items() if isinstance(i, NodeItem)}

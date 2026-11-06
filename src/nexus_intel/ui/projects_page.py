@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from shiboken6 import isValid
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -43,7 +45,7 @@ class NewProjectDialog(QDialog):
             self.template.addItem(v, k)
         self.hint = label(TEMPLATE_HINTS["blank"], "Muted", wrap=True)
         self.template.currentIndexChanged.connect(
-            lambda _: self.hint.setText(TEMPLATE_HINTS[self.template.currentData()]))
+            lambda _: isValid(self.hint) and self.hint.setText(TEMPLATE_HINTS.get(self.template.currentData(), "")))
         self.purpose = QPlainTextEdit()
         self.purpose.setPlaceholderText("Para que servem os dados deste projeto?")
         self.purpose.setFixedHeight(60)
