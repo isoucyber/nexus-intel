@@ -209,7 +209,7 @@ class MainWindow(QMainWindow):
         info = self.manager.get(project_id)
         self._drop_workspace()
         try:
-            self.workspace = Workspace(store, info.name, info.color)
+            self.workspace = Workspace(store, info.name, info.color, info.path)
         except Exception as exc:  # noqa: BLE001
             self.manager.close_current()
             show_error(self, exc)

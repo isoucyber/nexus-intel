@@ -10,6 +10,7 @@ from __future__ import annotations
 from shiboken6 import isValid
 
 import math
+import os
 from typing import Any
 
 import numpy as np
@@ -34,7 +35,7 @@ from nexus_intel.application.project_store import ProjectStore
 from nexus_intel.ui.common import Page, button, guarded, hbox, label
 from nexus_intel.ui.dialogs import RelationDialog
 from nexus_intel.ui.design import assets, tokens
-from nexus_intel.ui.design.components import on_theme, paint_avatar
+from nexus_intel.ui.design.components import notify, on_theme, paint_avatar
 
 STATUS_PEN = {
     "verified": Qt.PenStyle.SolidLine,
@@ -333,19 +334,32 @@ class GraphPage(Page):
         if not keep_positions:
             self.view.fit()
 
-    def export_png(self) -> None:
+    def export_png(self) -> str | None:
+        """Pede o destino, salva e avisa o nome e a pasta do arquivo. Devolve o caminho salvo."""
         path, _ = QFileDialog.getSaveFileName(self, "Exportar grafo", "grafo.png", "Imagem PNG (*.png)")
         if not path:
-            return
+            return None
+        if not self.save_png(path):
+            notify(self, "Não foi possível salvar a imagem. Verifique a pasta escolhida e tente de novo.", "danger")
+            return None
+        folder, name = os.path.split(path)
+        notify(self, f"Grafo exportado: {name} em {folder}", "success")
+        return path
+
+    def save_png(self, path: str) -> bool:
+        if not self.view.scene().items():
+            self.reload()
         scene = self.view.scene()
         rect = scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
+        if rect.isEmpty():
+            rect = QRectF(0, 0, 400, 300)
         img = QImage(int(rect.width() * 2), int(rect.height() * 2), QImage.Format.Format_ARGB32)
         img.fill(assets.qcolor(tokens.current().graph_bg))
         p = QPainter(img)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         scene.render(p, QRectF(img.rect()), rect)
         p.end()
-        img.save(path)
+        return bool(img.save(path))
 
 
 __all__ = ["GraphPage", "QWidget", "force_layout"]

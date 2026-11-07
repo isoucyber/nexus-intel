@@ -131,6 +131,8 @@ def test_toast_drawer_modal_and_reduced_motion(qtbot):
 
 
 def test_critical_flows_create_search_trash_lock(qtbot, paths, monkeypatch):
+    from PySide6.QtWidgets import QWidget
+
     from nexus_intel.ui import app, auth, common, workspace
     from tests.conftest import PASSWORD
 
@@ -150,11 +152,17 @@ def test_critical_flows_create_search_trash_lock(qtbot, paths, monkeypatch):
     ws = win.workspace
 
     # módulos sem backend aparecem desabilitados e explicados, nunca com dados simulados
-    assert set(ws.pending_items) == {"attachments", "map", "timeline", "ai", "semantic", "suggestions",
-                                     "io", "backup"}
+    assert set(ws.pending_items) == {"attachments", "map", "ai", "semantic", "suggestions", "backup"}
     for row in ws.pending_items.values():
         assert "em preparação" in row.toolTip().lower()
-    assert set(ws.nav_buttons) == {k for k, _ in ws.NAV}
+    assert set(ws.nav_buttons) == {k for k, _ in ws.NAV} and len(ws.NAV) == 15
+    for key, _ in ws.NAV:  # todos os módulos abrem e voltam sem erro
+        ws.go(key)
+        assert ws.stack.currentWidget() is ws.pages[key]
+    ws.go("ai")
+    assert "Indisponível" in " ".join(w.accessibleName() for w in ws.pages["ai"].findChildren(QWidget))
+    ws.go("backup")
+    assert ws.pages["backup"].count == 0  # projeto novo: nenhuma cópia real encontrada
 
     # criar (captura rápida) e buscar
     ws.search.setText("Clara Nunes Teste · pessoa")

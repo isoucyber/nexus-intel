@@ -101,7 +101,10 @@ def main() -> int:
     ws = win.workspace
     for key, name in (("home", "inicio"), ("entities", "central"), ("graph", "grafo"),
                       ("sources", "fontes"), ("quality", "qualidade"), ("trash", "lixeira"),
-                      ("audit", "auditoria")):
+                      ("audit", "auditoria"), ("timeline", "linha-do-tempo"), ("io", "importacao-exportacao"),
+                      ("backup", "backup"), ("ai", "ia"), ("suggestions", "sugestoes"), ("map", "mapa")):
+        if key not in ws.pages:
+            continue
         ws.go(key)
         if key == "quality" and hasattr(ws.pages[key], "_scan"):
             ws.pages[key]._scan()

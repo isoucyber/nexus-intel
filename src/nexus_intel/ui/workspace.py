@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
@@ -45,6 +46,8 @@ from nexus_intel.ui.design.table import Column, DataTable
 from nexus_intel.ui.dialogs import NewEntityDialog, SourceDialog
 from nexus_intel.ui.entity_page import EntityPage
 from nexus_intel.ui.graph_view import GraphPage
+from nexus_intel.ui.module_pages import SPECS, BackupPage, ImportExportPage, make_pending
+from nexus_intel.ui.timeline_page import TimelinePage
 
 _ROLE = Qt.ItemDataRole.UserRole
 
@@ -579,45 +582,37 @@ class Workspace(QWidget):
     back_to_projects = Signal()
     lock_requested = Signal()
 
-    # Módulos implementados (chave, rótulo). A ordem segue os grupos da barra lateral.
-    NAV = (("home", "Visão geral"), ("entities", "Entidades"), ("graph", "Grafo"), ("sources", "Fontes"),
-           ("quality", "Qualidade"), ("trash", "Lixeira"), ("audit", "Auditoria"))
-
-    # Grupos da navegação. Itens com explicação são módulos sem backend: aparecem
-    # desabilitados como “Em preparação”, nunca com dados simulados.
-    GROUPS: tuple[tuple[str, tuple[tuple[str, str, str, str | None], ...]], ...] = (
+    # Grupos da navegação: (chave, rótulo, ícone, em_preparação). Módulos em preparação
+    # abrem uma página que explica o que existe e o que falta, sem dados simulados.
+    GROUPS: tuple[tuple[str, tuple[tuple[str, str, str, bool], ...]], ...] = (
         ("Investigação", (
-            ("home", "Visão geral", "layout-dashboard", None),
-            ("entities", "Entidades", "database", None),
-            ("graph", "Grafo", "network", None),
-            ("sources", "Fontes", "library", None),
-            ("attachments", "Anexos cifrados", "file-text",
-             "Falta o armazenamento de arquivos cifrados por projeto (tabela, pasta e fluxo de decifração)."),
-            ("map", "Mapa offline", "map-pin",
-             "Faltam os dados cartográficos locais (ex.: MBTiles) e o componente de renderização offline."),
-            ("timeline", "Linha do tempo", "clock",
-             "Falta o módulo que reúne datas de afirmações, relações e eventos numa linha cronológica."),
+            ("home", "Visão geral", "layout-dashboard", False),
+            ("entities", "Entidades", "database", False),
+            ("graph", "Grafo", "network", False),
+            ("sources", "Fontes", "library", False),
+            ("timeline", "Linha do tempo", "clock", False),
+            ("attachments", "Anexos cifrados", "file-text", True),
+            ("map", "Mapa offline", "map-pin", True),
         )),
         ("Inteligência", (
-            ("ai", "IA e análises", "sparkles",
-             "Falta a integração com IA (Ollama local por padrão; nuvem opcional, desligada)."),
-            ("semantic", "Busca semântica", "file-search",
-             "Falta o índice de embeddings; hoje existe só a busca textual (Ctrl+K)."),
-            ("suggestions", "Sugestões e aprovações", "git-merge",
-             "Faltam a geração de sugestões pela IA e o registro de aprovações."),
+            ("ai", "IA e análises", "sparkles", True),
+            ("semantic", "Busca semântica", "file-search", True),
+            ("suggestions", "Sugestões e aprovações", "git-merge", True),
         )),
         ("Dados", (
-            ("quality", "Qualidade", "shield-check", None),
-            ("io", "Importação e exportação", "upload",
-             "Faltam os formatos de importação e exportação de projeto."),
-            ("backup", "Backup", "history",
-             "Falta o backup agendado com registro de estado (último backup concluído, falhas)."),
-            ("trash", "Lixeira", "trash-2", None),
-            ("audit", "Auditoria", "scroll-text", None),
+            ("quality", "Qualidade", "shield-check", False),
+            ("io", "Importação e exportação", "upload", False),
+            ("backup", "Backup", "history", True),
+            ("trash", "Lixeira", "trash-2", False),
+            ("audit", "Auditoria", "scroll-text", False),
         )),
     )
+    LABELS = {k: lb for _g, items in GROUPS for k, lb, _i, _p in items}
+    ICONS = {k: ic for _g, items in GROUPS for k, _l, ic, _p in items}
+    NAV = tuple((k, lb) for _g, items in GROUPS for k, lb, _i, _p in items)
 
-    def __init__(self, store: ProjectStore, project_name: str, color: str) -> None:
+    def __init__(self, store: ProjectStore, project_name: str, color: str,
+                 project_path: Path | None = None) -> None:
         super().__init__()
         self.store = store
         self.setProperty("page", "true")
@@ -650,15 +645,12 @@ class Workspace(QWidget):
             nl.addSpacing(8)
             nl.addWidget(text(group.upper(), "overline"))
             nl.addSpacing(2)
-            for key, label_, icon, missing in items:
-                if missing is None:
-                    b = button(label_, lambda k=key: self.go(k), "Nav", icon=icon)
-                    b.setCheckable(True)
-                    self.nav_group.addButton(b)
-                    self.nav_buttons[key] = b
-                    nl.addWidget(b)
-                else:
-                    nl.addWidget(self._pending_item(key, label_, icon, missing))
+            for key, label_, icon, pending in items:
+                b = button(label_, lambda k=key: self.go(k), "Nav", icon=icon)
+                b.setCheckable(True)
+                self.nav_group.addButton(b)
+                self.nav_buttons[key] = b
+                nl.addWidget(self._pending_item(key, b) if pending else b)
         nl.addStretch(1)
         nav_scroll = QScrollArea()
         nav_scroll.setWidgetResizable(True)
@@ -701,6 +693,10 @@ class Workspace(QWidget):
             "quality": QualityPage(store),
             "trash": TrashPage(store),
             "audit": AuditPage(store),
+            "timeline": TimelinePage(store),
+            "io": ImportExportPage(lambda: self.pages["graph"].export_png()),
+            "backup": BackupPage(project_path),
+            **{k: make_pending(k) for k in ("attachments", "map", "ai", "semantic", "suggestions")},
         }
         for page in self.pages.values():
             self.stack.addWidget(page)
@@ -725,20 +721,21 @@ class Workspace(QWidget):
         on_theme(self, lambda _t: self._label_section_tab())
         self.go("home" if store.count_entities() else "entities")
 
-    def _pending_item(self, key: str, label_: str, icon: str, missing: str) -> QWidget:
+    def _pending_item(self, key: str, b: Any) -> QWidget:
+        """Item de módulo em preparação: texto em cinza + rótulo, abre a página explicativa."""
         row = QWidget()
         lay = QHBoxLayout(row)
         lay.setContentsMargins(0, 0, 4, 0)
         lay.setSpacing(4)
-        b = button(label_, None, "Nav", icon=icon)
-        b.setEnabled(False)
+        b.setProperty("pending", "true")
         lay.addWidget(b, 1)
-        tag = text("Em preparação", "caption")
-        lay.addWidget(tag)
-        tip = f"{label_}: em preparação. {missing}"
+        lay.addWidget(text("Em preparação", "caption"))
+        spec = SPECS.get(key)
+        missing = " ".join(spec.missing) if spec else "Backup agendado com registro de estado."
+        tip = f"{self.LABELS[key]}: em preparação. Falta: {missing}"
         row.setToolTip(tip)
         b.setToolTip(tip)
-        b.setAccessibleName(f"{label_}, em preparação")
+        b.setAccessibleName(f"{self.LABELS[key]}, em preparação")
         self.pending_items[key] = row
         return row
 
@@ -762,9 +759,8 @@ class Workspace(QWidget):
             self.go(target)
 
     def _label_section_tab(self) -> None:
-        title = dict(self.NAV)[self._current]
-        self.tabs.setTabText(0, title)
-        self.tabs.setTabIcon(0, assets.icon(assets.NAV_ICONS[self._current]))
+        self.tabs.setTabText(0, self.LABELS[self._current])
+        self.tabs.setTabIcon(0, assets.icon(self.ICONS[self._current]))
 
     def go(self, key: str) -> None:
         self._current = key

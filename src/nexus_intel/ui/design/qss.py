@@ -94,6 +94,7 @@ QPushButton[variant="nav"] {{
     color: {t.text_secondary}; padding: {pad_y}px {t.space("sm") + 2}px; border-radius: {r_md}px;
 }}
 QPushButton[variant="nav"]:hover {{ background: {t.surface_hover}; color: {t.text_primary}; }}
+QPushButton[variant="nav"][pending="true"] {{ color: {t.text_muted}; }}
 QPushButton[variant="nav"]:checked {{ background: {t.accent_subtle}; color: {t.text_primary}; font-weight: 600; }}
 QPushButton[variant="nav"]:focus {{ border: 2px solid {t.focus}; padding: {pad_y - 1}px {t.space("sm") + 1}px; }}
 QPushButton[size="sm"] {{ padding: {max(2, pad_y - 3)}px {t.space("sm")}px; font-size: {t.font_px("xs")}px; }}

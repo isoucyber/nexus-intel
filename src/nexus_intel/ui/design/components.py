@@ -328,6 +328,19 @@ def StatusBadge(status: str, count: int | None = None) -> Chip:  # noqa: N802
                 f"Status epistêmico: {label}")
 
 
+CITATION_KINDS = {
+    # (rótulo, tom, ícone, explicação) — seção 8.4: classificação das afirmações da IA
+    "documented": ("Documentado", "success", "file-text", "Vinculado a uma fonte do projeto, com link ao trecho"),
+    "interpretation": ("Interpretação da IA", "info", "sparkles", "Inferência a partir das fontes, não declarada nelas"),
+    "unverified": ("Não verificado", "warning", "circle-dashed", "Sem fonte verificável"),
+}
+
+
+def CitationBadge(kind: str) -> Chip:  # noqa: N802
+    label, tone, icon, tip = CITATION_KINDS[kind]
+    return Chip(label, TONES[tone], icon, tip)
+
+
 def EntityTypeChip(type_key: str, label: str) -> Chip:  # noqa: N802
     return Chip(label, lambda t: t.type_color(type_key), assets.TYPE_ICONS.get(type_key, "circle"))
 
