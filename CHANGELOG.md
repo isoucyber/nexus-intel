@@ -2,6 +2,21 @@
 
 Formato baseado em Keep a Changelog; versões seguem SemVer.
 
+## [0.3.1] — 2026-11-07
+### Adicionado
+- Linha do tempo com datas de afirmações e validade de relações (dados reais), filtros e navegação entre eventos.
+- Navegação do projeto em Investigação, Inteligência e Dados; módulos sem backend como "Em preparação".
+- Módulo Importação e exportação (PNG do grafo) e módulo Backup com estado real.
+- Selo de citação (Documentado, Interpretação da IA, Não verificado) no design system.
+- Relatório final da 0.3 em `docs/relatorio-0.3.md`.
+
+## [0.3.0] — 2026-11-07
+### Corrigido
+- Cards de projeto esticavam até a altura da janela; agora têm altura pelo conteúdo e colunas por largura.
+### Adicionado
+- Tela de projetos com versão, contador real, pesquisa e estados de carregando, vazio, erro e sem resultados.
+- Auditoria da interface em `docs/auditoria-0.3.md`.
+
 ## [0.2.0] — 2026-11-06 — Fase 1: design system
 ### Adicionado
 - Tokens centralizados e 6 temas (Escuro, Claro, OLED preto, Alto contraste, Midnight Blue, Graphite)
