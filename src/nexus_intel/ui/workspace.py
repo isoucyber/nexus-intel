@@ -724,12 +724,15 @@ class Workspace(QWidget):
     def _pending_item(self, key: str, b: Any) -> QWidget:
         """Item de módulo em preparação: texto em cinza + rótulo, abre a página explicativa."""
         row = QWidget()
-        lay = QHBoxLayout(row)
-        lay.setContentsMargins(0, 0, 4, 0)
-        lay.setSpacing(4)
+        lay = QVBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 2)
+        lay.setSpacing(0)
         b.setProperty("pending", "true")
-        lay.addWidget(b, 1)
-        lay.addWidget(text("Em preparação", "caption"))
+        lay.addWidget(b)
+        caption = text("Em preparação", "caption")
+        caption.setContentsMargins(37, 0, 0, 0)  # alinhado ao texto do botão, depois do ícone
+        caption.setStyleSheet(f"margin-top: -6px; font-size: {tokens.current().font_px('xs') - 1}px;")
+        lay.addWidget(caption)
         spec = SPECS.get(key)
         missing = " ".join(spec.missing) if spec else "Backup agendado com registro de estado."
         tip = f"{self.LABELS[key]}: em preparação. Falta: {missing}"
