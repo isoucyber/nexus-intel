@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QListWidget,
     QListWidgetItem,
+    QScrollArea,
     QStackedWidget,
     QTabWidget,
     QVBoxLayout,
@@ -578,8 +579,43 @@ class Workspace(QWidget):
     back_to_projects = Signal()
     lock_requested = Signal()
 
-    NAV = (("home", "Início"), ("entities", "Central de Informações"), ("graph", "Grafo"),
-           ("sources", "Fontes"), ("quality", "Qualidade"), ("trash", "Lixeira"), ("audit", "Auditoria"))
+    # Módulos implementados (chave, rótulo). A ordem segue os grupos da barra lateral.
+    NAV = (("home", "Visão geral"), ("entities", "Entidades"), ("graph", "Grafo"), ("sources", "Fontes"),
+           ("quality", "Qualidade"), ("trash", "Lixeira"), ("audit", "Auditoria"))
+
+    # Grupos da navegação. Itens com explicação são módulos sem backend: aparecem
+    # desabilitados como “Em preparação”, nunca com dados simulados.
+    GROUPS: tuple[tuple[str, tuple[tuple[str, str, str, str | None], ...]], ...] = (
+        ("Investigação", (
+            ("home", "Visão geral", "layout-dashboard", None),
+            ("entities", "Entidades", "database", None),
+            ("graph", "Grafo", "network", None),
+            ("sources", "Fontes", "library", None),
+            ("attachments", "Anexos cifrados", "file-text",
+             "Falta o armazenamento de arquivos cifrados por projeto (tabela, pasta e fluxo de decifração)."),
+            ("map", "Mapa offline", "map-pin",
+             "Faltam os dados cartográficos locais (ex.: MBTiles) e o componente de renderização offline."),
+            ("timeline", "Linha do tempo", "clock",
+             "Falta o módulo que reúne datas de afirmações, relações e eventos numa linha cronológica."),
+        )),
+        ("Inteligência", (
+            ("ai", "IA e análises", "sparkles",
+             "Falta a integração com IA (Ollama local por padrão; nuvem opcional, desligada)."),
+            ("semantic", "Busca semântica", "file-search",
+             "Falta o índice de embeddings; hoje existe só a busca textual (Ctrl+K)."),
+            ("suggestions", "Sugestões e aprovações", "git-merge",
+             "Faltam a geração de sugestões pela IA e o registro de aprovações."),
+        )),
+        ("Dados", (
+            ("quality", "Qualidade", "shield-check", None),
+            ("io", "Importação e exportação", "upload",
+             "Faltam os formatos de importação e exportação de projeto."),
+            ("backup", "Backup", "history",
+             "Falta o backup agendado com registro de estado (último backup concluído, falhas)."),
+            ("trash", "Lixeira", "trash-2", None),
+            ("audit", "Auditoria", "scroll-text", None),
+        )),
+    )
 
     def __init__(self, store: ProjectStore, project_name: str, color: str) -> None:
         super().__init__()
@@ -602,16 +638,33 @@ class Workspace(QWidget):
         pname = ElidedLabel(project_name, "h3")
         pname.setStyleSheet(f"border-left: 3px solid {color}; padding-left: 8px;")
         sl.addWidget(pname)
-        sl.addSpacing(14)
+        sl.addSpacing(8)
         self.nav_group = QButtonGroup(self)
         self.nav_buttons: dict[str, Any] = {}
-        for key, label_ in self.NAV:
-            b = button(label_, lambda k=key: self.go(k), "Nav", icon=assets.NAV_ICONS[key])
-            b.setCheckable(True)
-            self.nav_group.addButton(b)
-            self.nav_buttons[key] = b
-            sl.addWidget(b)
-        sl.addStretch(1)
+        self.pending_items: dict[str, Any] = {}
+        nav_host = QWidget()
+        nl = QVBoxLayout(nav_host)
+        nl.setContentsMargins(0, 0, 0, 0)
+        nl.setSpacing(1)
+        for group, items in self.GROUPS:
+            nl.addSpacing(8)
+            nl.addWidget(text(group.upper(), "overline"))
+            nl.addSpacing(2)
+            for key, label_, icon, missing in items:
+                if missing is None:
+                    b = button(label_, lambda k=key: self.go(k), "Nav", icon=icon)
+                    b.setCheckable(True)
+                    self.nav_group.addButton(b)
+                    self.nav_buttons[key] = b
+                    nl.addWidget(b)
+                else:
+                    nl.addWidget(self._pending_item(key, label_, icon, missing))
+        nl.addStretch(1)
+        nav_scroll = QScrollArea()
+        nav_scroll.setWidgetResizable(True)
+        nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        nav_scroll.setWidget(nav_host)
+        sl.addWidget(nav_scroll, 1)
         sl.addWidget(button("Projetos", self.back_to_projects.emit, "Nav", icon="folder"))
         lock = button("Bloquear", self.lock_requested.emit, "Nav", icon="lock", tip="Bloquear (Ctrl+L)")
         sl.addWidget(lock)
@@ -671,6 +724,23 @@ class Workspace(QWidget):
         self._current = "home"
         on_theme(self, lambda _t: self._label_section_tab())
         self.go("home" if store.count_entities() else "entities")
+
+    def _pending_item(self, key: str, label_: str, icon: str, missing: str) -> QWidget:
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 4, 0)
+        lay.setSpacing(4)
+        b = button(label_, None, "Nav", icon=icon)
+        b.setEnabled(False)
+        lay.addWidget(b, 1)
+        tag = text("Em preparação", "caption")
+        lay.addWidget(tag)
+        tip = f"{label_}: em preparação. {missing}"
+        row.setToolTip(tip)
+        b.setToolTip(tip)
+        b.setAccessibleName(f"{label_}, em preparação")
+        self.pending_items[key] = row
+        return row
 
     def shutdown(self) -> None:
         """Silencia sinais e timers antes da destruição (bloqueio, troca de projeto, fechar).

@@ -149,6 +149,13 @@ def test_critical_flows_create_search_trash_lock(qtbot, paths, monkeypatch):
     win.projects_page._create("Fluxos", "blank")
     ws = win.workspace
 
+    # módulos sem backend aparecem desabilitados e explicados, nunca com dados simulados
+    assert set(ws.pending_items) == {"attachments", "map", "timeline", "ai", "semantic", "suggestions",
+                                     "io", "backup"}
+    for row in ws.pending_items.values():
+        assert "em preparação" in row.toolTip().lower()
+    assert set(ws.nav_buttons) == {k for k, _ in ws.NAV}
+
     # criar (captura rápida) e buscar
     ws.search.setText("Clara Nunes Teste · pessoa")
     ws.search._create()
