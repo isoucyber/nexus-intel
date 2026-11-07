@@ -86,6 +86,8 @@ QPushButton[variant="ghost"]:hover, QToolButton[variant="ghost"]:hover {{ backgr
 QPushButton[variant="ghost"]:pressed, QToolButton[variant="ghost"]:pressed {{ background: {t.surface_active}; }}
 QPushButton[variant="ghost"]:focus, QToolButton[variant="ghost"]:focus {{ border: 2px solid {t.focus}; }}
 QPushButton[variant="danger"] {{ color: {t.danger}; }}
+QPushButton[variant="ghost"][tone="danger"] {{ color: {t.text_muted}; }}
+QPushButton[variant="ghost"][tone="danger"]:hover {{ color: {t.danger}; background: {t.danger_subtle}; }}
 QPushButton[variant="danger"]:hover {{ background: {t.danger_subtle}; border-color: {t.danger}; }}
 QPushButton[variant="nav"] {{
     background: transparent; border: 1px solid transparent; text-align: left;

@@ -120,6 +120,10 @@ RADIUS = {"sm": 4, "md": 6, "lg": 10, "xl": 14, "full": 999}
 SHADOW = {"sm": (10, 2, 0.22), "md": (24, 8, 0.32), "lg": (48, 16, 0.42)}
 DURATION = {"fast": 120, "base": 160, "slow": 200}
 
+# Cards da grade de projetos: a altura vem do conteúdo, limitada a esta faixa;
+# a largura fica entre min_w e max_w e o número de colunas se adapta à janela.
+CARD = {"min_w": 280, "max_w": 340, "min_h": 150, "max_h": 190, "pad": 16, "gap": 16}
+
 DENSITY = {"compacta": 0.8, "confortavel": 1.0, "espacosa": 1.25}
 MOTION = ("completas", "reduzidas", "desligadas")
 

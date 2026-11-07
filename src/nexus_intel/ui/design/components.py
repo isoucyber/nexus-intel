@@ -93,10 +93,12 @@ class Button(QPushButton):
 
     def __init__(self, text: str = "", variant: str = "secondary", icon: str | None = None,
                  on_click: Callable[[], Any] | None = None, tooltip: str = "", shortcut: str | None = None,
-                 size: str = "md", parent: QWidget | None = None) -> None:
+                 size: str = "md", tone: str | None = None, parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
         self._icon = icon
         self.setProperty("variant", variant)
+        if tone:
+            self.setProperty("tone", tone)  # ex.: fantasma discreto com cor de perigo
         if size != "md":
             self.setProperty("size", size)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -123,7 +125,7 @@ class Button(QPushButton):
     def _apply_icon(self, t: Tokens) -> None:
         if not self._icon:
             return
-        variant = self.property("variant")
+        variant = "danger" if self.property("tone") == "danger" else self.property("variant")
         color = {"primary": t.accent_fg, "danger": t.danger}.get(variant, t.text_secondary)
         active = {"primary": t.accent_fg, "danger": t.danger}.get(variant, t.text_primary)
         self.setIcon(assets.icon(self._icon, color, 16, active))
@@ -913,6 +915,64 @@ class Drawer(QFrame):
         anim.start()
         self._anim = anim
         return anim
+
+
+class ResponsiveGrid(QWidget):
+    """Grade de cartões de tamanho fixo: a largura da janela muda o número de colunas,
+    nunca a altura dos cartões. A altura do próprio widget é a soma das linhas, então
+    dentro de uma QScrollArea a lista rola em vez de esticar os cartões."""
+
+    def __init__(self, min_w: int, max_w: int, item_h: int, gap: int, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.min_w, self.max_w, self.item_h, self.gap = min_w, max_w, item_h, gap
+        self.items: list[QWidget] = []
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(0)
+
+    def columns_for(self, width: int) -> int:
+        return max(1, (width + self.gap) // (self.min_w + self.gap))
+
+    def item_width(self, width: int) -> int:
+        n = self.columns_for(width)
+        return int(max(1, min(self.max_w, (width - self.gap * (n - 1)) / n)))
+
+    @property
+    def columns(self) -> int:
+        return self.columns_for(self.width())
+
+    def set_items(self, widgets: Sequence[QWidget]) -> None:
+        self.clear()
+        for w in widgets:
+            w.setParent(self)
+            w.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            self.items.append(w)
+        self.relayout()
+
+    def set_item_height(self, h: int) -> None:
+        self.item_h = h
+        self.relayout()
+
+    def clear(self) -> None:
+        for w in self.items:
+            w.hide()
+            w.deleteLater()
+        self.items = []
+        self.setFixedHeight(0)
+
+    def relayout(self) -> None:
+        width = self.width()
+        n = self.columns_for(width)
+        cw = self.item_width(width)
+        for i, w in enumerate(self.items):
+            row, col = divmod(i, n)
+            w.setGeometry(col * (cw + self.gap), row * (self.item_h + self.gap), cw, self.item_h)
+            w.show()
+        rows = (len(self.items) + n - 1) // n
+        self.setFixedHeight(rows * self.item_h + max(0, rows - 1) * self.gap)
+
+    def resizeEvent(self, event: Any) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self.relayout()
 
 
 def rounded_path(rect: QRectF, radius: float) -> QPainterPath:
