@@ -42,6 +42,7 @@ from nexus_intel.ui.design.components import (
     ResponsiveGrid,
     Skeleton,
     notify,
+    require_text,
     text,
 )
 
@@ -80,13 +81,14 @@ class NewProjectDialog(QDialog):
         self.color_btn = button("Cor", self._pick)
         self._paint()
         form = QFormLayout(self)
-        form.addRow("Nome", self.name)
+        self.ok = button("Criar projeto", self.accept, "Primary")
+        form.addRow("Nome *", self.name)
+        form.addRow("", require_text(self.name, [self.ok], "O nome do projeto não pode ficar vazio."))
         form.addRow("Modelo", self.template)
         form.addRow("", self.hint)
         form.addRow("Finalidade", self.purpose)
         form.addRow("Base legal", self.legal)
         form.addRow("Cor", self.color_btn)
-        self.ok = button("Criar projeto", self.accept, "Primary")
         form.addRow(hbox(None, button("Cancelar", self.reject), self.ok))
         self.name.setFocus()
 

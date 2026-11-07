@@ -31,6 +31,7 @@ from nexus_intel.domain.model import (
     Epistemic,
 )
 from nexus_intel.ui.common import button, hbox, label, show_error
+from nexus_intel.ui.design.components import require_text
 
 
 def status_combo(default: str = "unverified") -> QComboBox:
@@ -117,6 +118,33 @@ class EntityPicker(QWidget):
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
 
+def delete_source_flow(store: ProjectStore, source: dict[str, Any], parent: QWidget) -> bool:
+    """Confirma (nomeando a fonte e dizendo o que acontece com os vínculos) e exclui."""
+    from nexus_intel.ui.common import confirm
+
+    counts = store.source_link_counts(source["id"])
+    links = []
+    if counts["claim"]:
+        links.append(f"{counts['claim']} afirmação(ões)")
+    if counts["relation"]:
+        links.append(f"{counts['relation']} relação(ões)")
+    if counts["entity"]:
+        links.append(f"{counts['entity']} entidade(s)")
+    impact = (f"Ela está vinculada a {' e '.join(links)}. Esses vínculos serão removidos; as afirmações e "
+              "relações continuam e, se ficarem sem nenhuma fonte, aparecerão em Qualidade."
+              if links else "Ela não está vinculada a nenhuma afirmação ou relação.")
+    if not confirm(parent, "Excluir fonte",
+                   f"Tem certeza que deseja excluir a fonte “{source['title']}”?\n\n{impact}\n\n"
+                   "Esta ação não pode ser desfeita.", danger=True):
+        return False
+    try:
+        store.delete_source(source["id"])
+    except Exception as exc:  # noqa: BLE001
+        show_error(parent, exc)
+        return False
+    return True
+
+
 class SourceDialog(QDialog):
     def __init__(self, store: ProjectStore, parent: QWidget | None = None, source: dict[str, Any] | None = None) -> None:
         super().__init__(parent)
@@ -150,7 +178,9 @@ class SourceDialog(QDialog):
         self.discredited = QCheckBox("Fonte desacreditada (afirmações que dependem só dela serão sinalizadas)")
         self.discredited.setChecked(bool(s.get("is_discredited")))
         form = QFormLayout(self)
+        self.save_btn = button("Salvar", self.accept, "Primary")
         form.addRow("Título *", self.title)
+        form.addRow("", require_text(self.title, [self.save_btn], "O título da fonte não pode ficar vazio."))
         form.addRow("Tipo", self.kind)
         form.addRow("URL", self.url)
         form.addRow("Autor", self.author)
@@ -158,11 +188,21 @@ class SourceDialog(QDialog):
         form.addRow("Consultada em", self.accessed)
         form.addRow("Confiabilidade", self.reliability)
         form.addRow("Observações", self.note)
+        self.deleted = False
+        actions: list[Any] = [None, button("Cancelar", self.reject), self.save_btn]
         if source:
             form.addRow(self.discredited)
-        form.addRow(hbox(None, button("Cancelar", self.reject), button("Salvar", self.accept, "Primary")))
+            actions.insert(0, button("Excluir fonte", self._delete, "Danger", icon="trash-2"))
+        form.addRow(hbox(*actions))
+
+    def _delete(self) -> None:
+        if self.source and delete_source_flow(self.store, self.source, self):
+            self.deleted = True
+            super().accept()
 
     def accept(self) -> None:
+        if not self.title.text().strip():
+            return  # botão já desabilitado; Enter no campo também não salva
         data = dict(
             title=self.title.text(), kind=self.kind.currentData(), url=self.url.text().strip(),
             author=self.author.text().strip(), published_at=self.published.text().strip(),
@@ -218,6 +258,7 @@ class NewEntityDialog(QDialog):
         form = QFormLayout(self)
         form.addRow("Tipo", self.type)
         form.addRow("Nome *", self.name)
+        form.addRow("", require_text(self.name, [self.save]))
         form.addRow("Resumo", self.summary)
         form.addRow("Outros nomes", self.aliases)
         form.addRow("Identificador", hbox(self.id_scheme, self.id_value))

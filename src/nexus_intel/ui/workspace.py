@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from nexus_intel.application.project_store import ProjectStore
+from nexus_intel.domain.errors import NexusError
 from nexus_intel.domain.model import SOURCE_KINDS
 from nexus_intel.ui import format as fmt
 from nexus_intel.ui.common import Page, button, confirm, guarded, hbox, label
@@ -43,7 +44,7 @@ from nexus_intel.ui.design.components import (
     text,
 )
 from nexus_intel.ui.design.table import Column, DataTable
-from nexus_intel.ui.dialogs import NewEntityDialog, SourceDialog
+from nexus_intel.ui.dialogs import NewEntityDialog, SourceDialog, delete_source_flow
 from nexus_intel.ui.entity_page import EntityPage
 from nexus_intel.ui.graph_view import GraphPage
 from nexus_intel.ui.module_pages import SPECS, BackupPage, ImportExportPage, make_pending
@@ -61,9 +62,17 @@ def _stack(*widgets: QWidget) -> QStackedWidget:
 
 # ------------------------------------------------------------------- início
 class KpiCard(Card):
-    def __init__(self, icon: str, caption: str) -> None:
+    """Número do Início. Clicável: leva ao lugar onde a informação está."""
+
+    activated = Signal()
+
+    def __init__(self, icon: str, caption: str, destination: str) -> None:
         super().__init__(padding="lg")
-        self._icon = icon
+        self._icon, self.caption, self.destination = icon, caption, destination
+        self.setProperty("clickable", "true")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.setToolTip(f"Abrir {destination}")
         row = QHBoxLayout()
         row.setSpacing(12)
         self.badge = text("")
@@ -76,6 +85,8 @@ class KpiCard(Card):
         col.addWidget(self.value)
         col.addWidget(text(caption, "muted"))
         row.addLayout(col, 1)
+        self.arrow = text("")
+        row.addWidget(self.arrow, 0, Qt.AlignmentFlag.AlignTop)
         self.body.addLayout(row)
         self._paint(tokens.current())
         on_theme(self, self._paint)
@@ -83,9 +94,22 @@ class KpiCard(Card):
     def _paint(self, t: tokens.Tokens) -> None:
         self.badge.setPixmap(assets.pixmap(self._icon, t.accent_text, 18))
         self.badge.setStyleSheet(f"background: {t.accent_subtle}; border-radius: {t.radius('md')}px;")
+        self.arrow.setPixmap(assets.pixmap("arrow-up-right", t.text_muted, 14))
 
     def set_value(self, n: int) -> None:
         self.value.setText(fmt.number(n))
+        self.setAccessibleName(f"{self.caption}: {n}. Abrir {self.destination}")
+
+    def mouseReleaseEvent(self, event: Any) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.activated.emit()
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event: Any) -> None:  # noqa: N802
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.activated.emit()
+            return
+        super().keyPressEvent(event)
 
 
 class DashboardPage(Page):
@@ -98,15 +122,20 @@ class DashboardPage(Page):
         self.layout_.addWidget(SectionHeader("Início", "Visão geral do projeto aberto."))
         kpis = QHBoxLayout()
         kpis.setSpacing(12)
-        self.kpi = {
-            "entities": KpiCard("database", "Entidades"),
-            "relations": KpiCard("network", "Relações"),
-            "claims": KpiCard("list", "Afirmações"),
-            "sources": KpiCard("library", "Fontes"),
-            "trashed": KpiCard("trash-2", "Na lixeira"),
+        # número → (ícone, rótulo, destino legível, chave do módulo de destino)
+        targets = {
+            "entities": ("database", "Entidades", "a lista de entidades", "entities"),
+            "relations": ("network", "Relações", "o grafo de relações", "graph"),
+            "claims": ("list", "Afirmações", "Qualidade (conflitos e afirmações sem fonte)", "quality"),
+            "sources": ("library", "Fontes", "a lista de fontes", "sources"),
+            "trashed": ("trash-2", "Na lixeira", "a lixeira", "trash"),
         }
-        for k in self.kpi.values():
-            kpis.addWidget(k, 1)
+        self.kpi = {}
+        for key, (icon, caption, readable, dest) in targets.items():
+            card = KpiCard(icon, caption, readable)
+            card.activated.connect(lambda d=dest: self.go_to.emit(d))
+            self.kpi[key] = card
+            kpis.addWidget(card, 1)
         self.layout_.addLayout(kpis)
 
         grid = QGridLayout()
@@ -120,10 +149,13 @@ class DashboardPage(Page):
                            actions=[button("Ver todas", lambda: self.go_to.emit("entities"), "Ghost")])
         recent_card.add(self.recent, 1)
         self.types = BarList(empty_text="Nenhuma entidade ainda.")
+        self.types.activated.connect(lambda key: self.go_to.emit(f"entities:type:{key}"))
+        self.types.setToolTip("Clique num tipo para ver as entidades dele")
         types_card = Card("Entidades por tipo", icon="layers")
         types_card.add(self.types)
         types_card.body.addStretch(1)
         self.statuses = BarList(empty_text="Nenhuma afirmação ainda.")
+        self.statuses.activated.connect(lambda _k: self.go_to.emit("quality"))
         status_card = Card("Afirmações por status", icon="shield-check",
                            subtitle="Relatado ≠ verificado: confirme com uma segunda fonte.")
         status_card.add(self.statuses)
@@ -272,6 +304,7 @@ class EntitiesPage(Page):
 # ------------------------------------------------------------------- fontes
 class SourcesPage(Page):
     open_entity = Signal(str)
+    changed = Signal()
 
     def __init__(self, store: ProjectStore) -> None:
         super().__init__()
@@ -281,7 +314,7 @@ class SourcesPage(Page):
         self.layout_.addWidget(SectionHeader(
             "Fontes", "Confiabilidade da fonte (A–F) e credibilidade da informação (1–6) seguem a escala do "
             "Almirantado e são sempre definidas por você.",
-            [button("Nova fonte", self._new, "Primary", icon="plus")]))
+            [self._delete_btn(), button("Nova fonte", self._new, "Primary", icon="plus")]))
         self.layout_.addWidget(self.q)
         self.table = DataTable([
             Column("title", "Título", stretch=True,
@@ -293,7 +326,7 @@ class SourcesPage(Page):
             Column("accessed_at", "Consultada", "muted", width=110),
         ])
         self.table.row_activated.connect(lambda s: self._edit(s["id"]))
-        self.table.clicked.connect(lambda _i: self._usages())
+        self.table.selectionModel().currentRowChanged.connect(lambda *_: self._usages())
         self.empty = EmptyState("library", "Nenhuma fonte cadastrada",
                                 "Fontes são a base de tudo: cada afirmação deve apontar de onde veio.",
                                 "Nova fonte", self._new)
@@ -304,8 +337,25 @@ class SourcesPage(Page):
         self.uses.itemDoubleClicked.connect(lambda it: self.open_entity.emit(it.data(_ROLE)))
         self.layout_.addWidget(self.uses, 1)
 
+    def _delete_btn(self) -> Any:
+        self.delete_btn = button("Excluir fonte", self._delete, "Danger", icon="trash-2",
+                                 tip="Excluir a fonte selecionada")
+        self.delete_btn.setEnabled(False)
+        return self.delete_btn
+
+    def _delete(self) -> None:
+        s = self.table.current_row()
+        if not s:
+            notify(self, "Selecione uma fonte na lista primeiro.", "info")
+            return
+        if delete_source_flow(self.store, s, self):
+            self.refresh()
+            self.changed.emit()
+            notify(self, f"Fonte “{s['title']}” excluída.", "success")
+
     def refresh(self) -> None:
         rows = guarded(self, lambda: self.store.list_sources(self.q.text())) or []
+        self.delete_btn.setEnabled(False)
         self.table.set_rows(rows)
         self.stack.setCurrentWidget(self.table if rows or self.q.text() else self.empty)
         self.uses.clear()
@@ -313,6 +363,7 @@ class SourcesPage(Page):
     def _usages(self) -> None:
         self.uses.clear()
         s = self.table.current_row()
+        self.delete_btn.setEnabled(s is not None)
         if not s:
             return
         for u in self.store.source_usages(s["id"]):
@@ -328,8 +379,18 @@ class SourcesPage(Page):
             notify(self, "Fonte cadastrada.", "success")
 
     def _edit(self, sid: str) -> None:
-        if SourceDialog(self.store, self, source=self.store.get_source(sid)).exec():
+        try:
+            source = self.store.get_source(sid)
+        except NexusError:
+            notify(self, "Essa fonte não existe mais.", "info")
             self.refresh()
+            return
+        dlg = SourceDialog(self.store, self, source=source)
+        if dlg.exec():
+            self.refresh()
+            self.changed.emit()
+            if dlg.deleted:
+                notify(self, f"Fonte “{source['title']}” excluída.", "success")
 
 
 # ------------------------------------------------------------------- qualidade
@@ -758,8 +819,19 @@ class Workspace(QWidget):
         if target == "entities:new":
             self.go("entities")
             self.pages["entities"].new_entity()
-        else:
+        elif target.startswith("entities:type:"):
+            type_key = target.rsplit(":", 1)[1]
+            types = {t["key"]: t["id"] for t in self.store.entity_types()}
+            if type_key not in types:
+                notify(self, "Esse tipo de entidade não existe mais.", "info")
+                return
+            page = self.pages["entities"]
+            page.type.set_value(types[type_key])  # o filtro recarrega a lista
+            self.go("entities")
+        elif target in self.pages:
             self.go(target)
+        else:
+            notify(self, "Esse destino não está disponível nesta versão.", "info")
 
     def _label_section_tab(self) -> None:
         self.tabs.setTabText(0, self.LABELS[self._current])
@@ -782,6 +854,12 @@ class Workspace(QWidget):
         self._loaded.add(key)
 
     def open_entity(self, eid: str) -> None:
+        try:
+            self.store.get_entity(eid)
+        except NexusError:
+            notify(self, "Essa entidade não existe mais: ela foi excluída definitivamente.", "info")
+            self._data_changed()
+            return
         for i in range(1, self.tabs.count()):
             w = self.tabs.widget(i)
             if isinstance(w, EntityPage) and w.entity_id == eid:

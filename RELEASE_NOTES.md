@@ -1,15 +1,12 @@
-## NEXUS INTEL 0.3.1 — módulos do projeto e linha do tempo
+## NEXUS INTEL 0.3.2 — números clicáveis, nomes obrigatórios e exclusão de fontes
 
 **Baixe** `NexusIntel-Setup-*.exe` abaixo e execute. Se o Windows SmartScreen avisar, clique em **Mais informações → Executar assim mesmo**. Seus usuários e projetos continuam funcionando.
 
 ### Novidades
-- **Linha do tempo**: datas registradas nas entidades (nascimento, fundação, data de evento…) e a validade das relações, em ordem cronológica, com filtros por tipo e período, status, fontes e acesso direto à entidade
-- **Navegação do projeto** organizada em Investigação, Inteligência e Dados
-- **Importação e exportação**: exportar a imagem do grafo (PNG), mostrando o nome e a pasta do arquivo salvo
-- **Backup**: mostra o estado real do sistema e as cópias de segurança feitas antes de atualizações do banco
-- Cards de projeto compactos e grade que se adapta à largura da janela (desde a 0.3.0)
+- **Números do Início clicáveis**: Entidades, Relações, Afirmações, Fontes e Na lixeira levam direto ao lugar da informação. Clicar num tipo em “Entidades por tipo” abre a lista já filtrada por ele. Funciona com mouse e teclado (Tab + Enter)
+- **Excluir fonte**: na lista de Fontes e na tela de edição da fonte. A confirmação diz quantas afirmações e relações estão ligadas a ela; os vínculos são removidos, as afirmações e relações continuam e, se ficarem sem nenhuma fonte, aparecem em Qualidade
+- **Nome obrigatório**: fontes, entidades, projetos, tipos e campos não podem ser criados nem salvos com nome vazio ou só com espaços. O botão de salvar fica desabilitado e o campo mostra o motivo
 
-### Em preparação (aparecem como tal, sem dados simulados)
-Anexos cifrados, mapa offline, IA e análises, busca semântica, sugestões e aprovações, backup automático e importação/exportação de dados.
-
-Relatório completo: `docs/relatorio-0.3.md` no repositório.
+### Correções
+- Abrir uma entidade que foi excluída definitivamente mostra um aviso, em vez de abrir uma aba vazia
+- Editar uma fonte apagando o título deixava a fonte sem nome

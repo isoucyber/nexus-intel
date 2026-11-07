@@ -2,6 +2,15 @@
 
 Formato baseado em Keep a Changelog; versões seguem SemVer.
 
+## [0.3.2] — 2026-11-07
+### Adicionado
+- Números do Início e barras de “Entidades por tipo” clicáveis, com mouse e teclado.
+- Exclusão de fonte (lista e tela de edição) com confirmação que informa os vínculos afetados.
+- Regra única de nome obrigatório (`require_name`) para entidades, fontes, projetos, tipos e campos, na criação e na edição.
+### Corrigido
+- Editar uma fonte apagando o título gravava título vazio.
+- Abrir entidade excluída definitivamente abria uma aba vazia.
+
 ## [0.3.1] — 2026-11-07
 ### Adicionado
 - Linha do tempo com datas de afirmações e validade de relações (dados reais), filtros e navegação entre eventos.

@@ -110,6 +110,10 @@ QDoubleSpinBox:hover {{ border-color: {t.text_muted}; }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus,
 QDoubleSpinBox:focus, QDateEdit:focus {{ border: 2px solid {t.focus}; padding: {pad_y - 2}px {t.space("sm") + 1}px; }}
 QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{ color: {t.text_disabled}; border-color: {t.border}; }}
+QLineEdit[invalid="true"] {{ border: 2px solid {t.danger}; }}
+QLabel[fieldError="true"] {{ color: {t.danger}; font-size: {t.font_px("xs")}px; }}
+QFrame[clickable="true"]:hover {{ border-color: {t.accent}; background: {t.surface_hover}; }}
+QFrame[clickable="true"]:focus {{ border: 2px solid {t.focus}; }}
 QLineEdit[search="true"] {{ background: {t.surface}; border-radius: {r_md}px; padding-left: {t.space("sm")}px; }}
 QComboBox {{ padding-right: 28px; }}
 QComboBox::drop-down {{ border: none; width: 26px; subcontrol-origin: padding; subcontrol-position: center right; }}

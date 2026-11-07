@@ -40,6 +40,7 @@ from nexus_intel.ui.common import (
 from nexus_intel.ui.dialogs import ClaimDialog, EvidenceDialog, RelationDialog
 from nexus_intel.ui.design import assets, tokens
 from nexus_intel.ui.design.components import (
+    require_text,
     STATUS_LABELS,
     Badge,
     ElidedLabel,
@@ -122,7 +123,8 @@ class EntityPage(Page):
         self.f_ids.setPlaceholderText("cpf:123.456.789-09; domain:exemplo.com")
         self.f_ids.setToolTip("Esquemas: " + ", ".join(f"{k} ({v})" for k, v in IDENTIFIER_SCHEMES.items()))
         form = QFormLayout()
-        form.addRow("Nome", self.f_name)
+        form.addRow("Nome *", self.f_name)
+        form.addRow("", require_text(self.f_name, [], "O nome não pode ficar vazio."))
         form.addRow("Tipo", self.f_type)
         form.addRow("Resumo", self.f_summary)
         form.addRow("Importância", self.f_importance)
@@ -132,11 +134,16 @@ class EntityPage(Page):
         form.addRow("Descrição", self.f_desc)
         form.addRow("Privado", self.f_private)
         self.meta = label("", "Muted")
-        form.addRow(hbox(self.meta, None, button("Salvar alterações", self._save, "Primary")))
+        self.save_btn = button("Salvar alterações", self._save, "Primary")
+        form.addRow(hbox(self.meta, None, self.save_btn))
+        self.f_name.textChanged.connect(lambda txt: self.save_btn.setEnabled(bool(txt.strip())))
         w.setLayout(form)
         return w
 
     def _save(self) -> None:
+        if not self.f_name.text().strip():
+            return  # nome inválido: botão desabilitado e mensagem no campo
+
         def run() -> None:
             e = self.entity
             changes: dict[str, Any] = {}

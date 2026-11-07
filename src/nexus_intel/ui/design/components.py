@@ -179,6 +179,39 @@ class Input(QLineEdit):
             self._action.setIcon(assets.icon(self._icon, t.text_muted))
 
 
+def require_text(edit: QLineEdit, buttons: Sequence[QPushButton], message: str = "O nome não pode ficar vazio."
+                 ) -> QLabel:
+    """Campo obrigatório: botões desabilitados e mensagem no campo enquanto o texto (sem
+    espaços nas pontas) estiver vazio. A mesma regra é aplicada de novo no backend.
+    Devolve o rótulo de erro, para ser colocado logo abaixo do campo."""
+    error = QLabel(message)
+    error.setProperty("role", "danger")
+    error.setProperty("fieldError", "true")
+    error.hide()
+    touched = {"value": bool(edit.text())}
+
+    def update(*_: Any) -> None:
+        valid = bool(edit.text().strip())
+        for b in buttons:
+            b.setEnabled(valid)
+        show = not valid and touched["value"]
+        error.setVisible(show)
+        if edit.property("invalid") != ("true" if show else None):
+            edit.setProperty("invalid", "true" if show else None)
+            repolish(edit)
+        edit.setAccessibleDescription(message if not valid else "")
+
+    def mark_touched(*_: Any) -> None:
+        touched["value"] = True
+        update()
+
+    edit.textEdited.connect(mark_touched)
+    edit.editingFinished.connect(mark_touched)
+    edit.textChanged.connect(update)
+    update()
+    return error
+
+
 class Select(QComboBox):
     def __init__(self, items: Sequence[tuple[str, Any]] = (), current: Any = None,
                  parent: QWidget | None = None) -> None:
