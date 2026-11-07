@@ -260,7 +260,8 @@ class BackupPage(Page):
                                "atualizada desde a criação.", "muted", wrap=True)
         copies.add(self.table)
         copies.add(self.none_label)
-        self.layout_.addWidget(copies, 1)
+        self.layout_.addWidget(copies)
+        self.layout_.addStretch(1)
 
     def refresh(self) -> None:
         rows = migration_copies(self.project_path)

@@ -731,7 +731,7 @@ class Workspace(QWidget):
         lay.addWidget(b)
         caption = text("Em preparação", "caption")
         caption.setContentsMargins(37, 0, 0, 0)  # alinhado ao texto do botão, depois do ícone
-        caption.setStyleSheet(f"margin-top: -6px; font-size: {tokens.current().font_px('xs') - 1}px;")
+        caption.setStyleSheet(f"font-size: {tokens.current().font_px('xs') - 1}px;")
         lay.addWidget(caption)
         spec = SPECS.get(key)
         missing = " ".join(spec.missing) if spec else "Backup agendado com registro de estado."
