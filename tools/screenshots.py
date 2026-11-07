@@ -74,8 +74,30 @@ def main() -> int:
     win.show_projects()
     shot(win, "projetos")
 
+    # Grade de projetos em várias larguras (critério F1 da 0.3).
+    from PySide6.QtCore import Qt as _Qt
+
+    from nexus_intel.ui.projects_page import ProjectsPage
+
+    for i, (name, tpl) in enumerate([("Auditoria de fornecedores 2026", "investigation"),
+                                     ("Pesquisa — redes logísticas do Adriático", "research"),
+                                     ("Inventário de domínios", "it_assets"),
+                                     ("Família Prado (genealogia)", "genealogy"),
+                                     ("Um projeto com nome propositalmente muito longo para testar reticências",
+                                      "blank")]):
+        win.manager.create(name, tpl)
+    for w, h in ((1024, 768), (1366, 768), (1920, 1080), (2560, 1440), (700, 900)):
+        page = ProjectsPage(win.manager)
+        page.setAttribute(_Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        page.resize(w, h)
+        page.show()
+        page.refresh()
+        shot(page, f"projetos-{w}x{h}")
+        print(f"  {w}px: {page.grid.columns} colunas, card {page.grid.item_width(page.grid.width())}x{page.grid.item_h}")
+        page.close()
+
     projects = win.manager.list()
-    win.open_project(projects[0].id)
+    win.open_project(next(p.id for p in projects if p.name == "Operação Maré Alta"))
     ws = win.workspace
     for key, name in (("home", "inicio"), ("entities", "central"), ("graph", "grafo"),
                       ("sources", "fontes"), ("quality", "qualidade"), ("trash", "lixeira"),
