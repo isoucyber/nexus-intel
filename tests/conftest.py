@@ -58,3 +58,20 @@ def store(manager):
 
 
 requires_sqlcipher = pytest.mark.skipif(not ENCRYPT, reason="sqlcipher3 não instalado")
+
+
+@pytest.fixture(autouse=True)
+def no_blocking_dialogs(monkeypatch):
+    """Um diálogo modal num teste travaria o CI para sempre: falha na hora, com o texto."""
+    try:
+        from PySide6.QtWidgets import QDialog, QMessageBox
+    except ImportError:
+        return
+
+    def boom(self, *a, **k):
+        text = self.text() if isinstance(self, QMessageBox) else self.windowTitle()
+        raise AssertionError(f"diálogo modal inesperado no teste: {text!r}")
+
+    monkeypatch.setattr(QMessageBox, "exec", boom)
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: boom(QMessageBox())))
+    monkeypatch.setattr(QDialog, "exec", boom)

@@ -22,10 +22,12 @@ def opened(monkeypatch):
 
 @pytest.fixture
 def yes(monkeypatch):
-    from nexus_intel.ui import common
+    from nexus_intel.ui import common, workspace
 
     asked: list[str] = []
-    monkeypatch.setattr(common, "confirm", lambda _p, _t, msg, danger=False: asked.append(msg) or True)
+    fake = lambda _p, _t, msg, danger=False: asked.append(msg) or True  # noqa: E731
+    monkeypatch.setattr(common, "confirm", fake)
+    monkeypatch.setattr(workspace, "confirm", fake)  # a Lixeira importa confirm diretamente
     return asked
 
 
