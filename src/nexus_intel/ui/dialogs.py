@@ -32,6 +32,7 @@ from nexus_intel.domain.model import (
 )
 from nexus_intel.ui.common import button, hbox, label, show_error
 from nexus_intel.ui.design.components import require_text
+from nexus_intel.ui.links import open_external_link
 
 
 def status_combo(default: str = "unverified") -> QComboBox:
@@ -145,6 +146,28 @@ def delete_source_flow(store: ProjectStore, source: dict[str, Any], parent: QWid
     return True
 
 
+def cut_relation_flow(store: ProjectStore, relation_id: str, parent: QWidget) -> bool:
+    """Confirma nomeando as duas pontas e corta (vai para a lixeira; entidades intactas)."""
+    from nexus_intel.ui.common import confirm
+
+    try:
+        rel = store.get_relation(relation_id)
+    except Exception as exc:  # noqa: BLE001 - relação pode já ter sido excluída
+        show_error(parent, exc)
+        return False
+    if not confirm(parent, "Cortar relação",
+                   f"Cortar a relação “{rel['phrase']}”?\n\nA relação vai para a Lixeira, de onde pode ser "
+                   f"restaurada. “{rel['source_name']}” e “{rel['target_name']}” não são apagadas.",
+                   danger=True):
+        return False
+    try:
+        store.cut_relation(relation_id)
+    except Exception as exc:  # noqa: BLE001
+        show_error(parent, exc)
+        return False
+    return True
+
+
 class SourceDialog(QDialog):
     def __init__(self, store: ProjectStore, parent: QWidget | None = None, source: dict[str, Any] | None = None) -> None:
         super().__init__(parent)
@@ -182,7 +205,9 @@ class SourceDialog(QDialog):
         form.addRow("Título *", self.title)
         form.addRow("", require_text(self.title, [self.save_btn], "O título da fonte não pode ficar vazio."))
         form.addRow("Tipo", self.kind)
-        form.addRow("URL", self.url)
+        open_url = button("Abrir", lambda: open_external_link(self.url.text(), self), icon="external-link",
+                          tip="Abrir no navegador padrão")
+        form.addRow("URL", hbox(self.url, open_url, spacing=6))
         form.addRow("Autor", self.author)
         form.addRow("Publicada em", self.published)
         form.addRow("Consultada em", self.accessed)

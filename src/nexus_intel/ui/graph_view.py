@@ -9,13 +9,14 @@ from __future__ import annotations
 
 from shiboken6 import isValid
 
+import html
 import math
 import os
 from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QFont, QImage, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QFont, QImage, QPainter, QPainterPath, QPainterPathStroker, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,16 +27,23 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsSimpleTextItem,
     QGraphicsView,
+    QHBoxLayout,
+    QLabel,
     QMenu,
+    QStyle,
+    QStyleOptionGraphicsItem,
     QSpinBox,
     QWidget,
 )
 
 from nexus_intel.application.project_store import ProjectStore
 from nexus_intel.ui.common import Page, button, guarded, hbox, label
-from nexus_intel.ui.dialogs import RelationDialog
+from nexus_intel.ui.dialogs import RelationDialog, cut_relation_flow
+from nexus_intel.ui.entity_page import evidence_line_html
+from nexus_intel.ui.links import open_external_link
+from nexus_intel.domain.errors import NexusError
 from nexus_intel.ui.design import assets, tokens
-from nexus_intel.ui.design.components import notify, on_theme, paint_avatar
+from nexus_intel.ui.design.components import STATUS_LABELS, Button, Card, notify, on_theme, paint_avatar
 
 STATUS_PEN = {
     "verified": Qt.PenStyle.SolidLine,
@@ -140,8 +148,12 @@ class EdgeItem(QGraphicsPathItem):
         pen = QPen(color, 2.2 if status == "verified" else 1.6, STATUS_PEN.get(status, Qt.PenStyle.SolidLine))
         self.setPen(pen)
         self.setZValue(1)
+        self.view: GraphView | None = None
+        self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        self.setAcceptHoverEvents(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(f"{a.data_['display_name']} — {data['label']} → {b.data_['display_name']}\n"
-                        f"status: {status}")
+                        f"status: {status}\nClique para ver detalhes · botão direito para cortar")
         a.edges.append(self)
         b.edges.append(self)
         self.adjust()
@@ -164,10 +176,36 @@ class EdgeItem(QGraphicsPathItem):
             path.lineTo(right)
         self.setPath(path)
 
+    def shape(self) -> QPainterPath:
+        """Área de clique mais larga que a linha, para ser fácil selecionar."""
+        stroker = QPainterPathStroker()
+        stroker.setWidth(12)
+        return stroker.createStroke(self.path())
+
+    def paint(self, p: QPainter, option: Any, widget: Any = None) -> None:
+        opt = QStyleOptionGraphicsItem(option)
+        opt.state &= ~QStyle.StateFlag.State_Selected  # sem o retângulo tracejado padrão
+        if self.isSelected():
+            pen = QPen(self.pen())
+            pen.setColor(assets.qcolor(tokens.current().focus))
+            pen.setWidthF(self.pen().widthF() + 1.8)
+            p.setPen(pen)
+            p.drawPath(self.path())
+            return
+        super().paint(p, opt, widget)
+
+    def contextMenuEvent(self, event: Any) -> None:  # noqa: N802
+        if self.view is not None:
+            self.scene().clearSelection()
+            self.setSelected(True)
+            self.view.edge_menu(self, event.screenPos())
+
 
 class GraphView(QGraphicsView):
     node_activated = Signal(str)
     node_selected = Signal(str)
+    edge_selected = Signal(str)
+    selection_cleared = Signal()
 
     def __init__(self, page: GraphPage) -> None:
         super().__init__()
@@ -181,9 +219,15 @@ class GraphView(QGraphicsView):
         self.scene().selectionChanged.connect(self._sel)
 
     def _sel(self) -> None:
-        items = [i for i in self.scene().selectedItems() if isinstance(i, NodeItem)]
-        if items:
-            self.node_selected.emit(items[0].data_["id"])
+        selected = self.scene().selectedItems()
+        nodes = [i for i in selected if isinstance(i, NodeItem)]
+        edges = [i for i in selected if isinstance(i, EdgeItem)]
+        if nodes:
+            self.node_selected.emit(nodes[0].data_["id"])
+        elif edges:
+            self.edge_selected.emit(edges[0].data_["id"])
+        else:
+            self.selection_cleared.emit()
 
     def wheelEvent(self, event: Any) -> None:
         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
@@ -193,10 +237,20 @@ class GraphView(QGraphicsView):
 
     def mousePressEvent(self, event: Any) -> None:
         item = self.itemAt(event.position().toPoint())
-        node = item if isinstance(item, NodeItem) else (item.parentItem() if item else None)
-        self.setDragMode(QGraphicsView.DragMode.NoDrag if isinstance(node, NodeItem)
+        node = item if isinstance(item, NodeItem | EdgeItem) else (item.parentItem() if item else None)
+        self.setDragMode(QGraphicsView.DragMode.NoDrag if isinstance(node, NodeItem | EdgeItem)
                          else QGraphicsView.DragMode.ScrollHandDrag)
         super().mousePressEvent(event)
+
+    def edge_menu(self, edge: EdgeItem, screen_pos: Any) -> None:
+        d = edge.data_
+        m = QMenu(self)
+        m.addAction("Ver detalhes da relação", lambda: self.page.show_edge(d["id"]))
+        m.addAction(f"Abrir “{edge.a.data_['display_name']}”", lambda: self.node_activated.emit(d["source_id"]))
+        m.addAction(f"Abrir “{edge.b.data_['display_name']}”", lambda: self.node_activated.emit(d["target_id"]))
+        m.addSeparator()
+        m.addAction(assets.icon("x", tokens.current().danger), "Cortar relação…", lambda: self.page.cut_edge(edge))
+        m.exec(screen_pos)
 
     def node_menu(self, node: NodeItem, screen_pos: Any) -> None:
         eid = node.data_["id"]
@@ -219,6 +273,7 @@ class GraphView(QGraphicsView):
 
 class GraphPage(Page):
     open_entity = Signal(str)
+    changed = Signal()
 
     def __init__(self, store: ProjectStore) -> None:
         super().__init__()
@@ -229,6 +284,8 @@ class GraphPage(Page):
         on_theme(self, self._retheme)
         self.view.node_activated.connect(self.open_entity.emit)
         self.view.node_selected.connect(self._selected)
+        self.view.edge_selected.connect(self.show_edge)
+        self.view.selection_cleared.connect(self._clear_selection_info)
 
         self.type_filter = QComboBox()
         self.type_filter.addItem("Todos os tipos", None)
@@ -258,9 +315,25 @@ class GraphPage(Page):
             button("Ver tudo", self.show_all), button("Reorganizar", self.reload),
             button("Exportar PNG", self.export_png)))
         self.layout_.addWidget(hbox(self.info, None, self.sel_info))
+        # painel da relação selecionada (aparece ao clicar numa linha)
+        self.edge_panel = Card(icon="network")
+        self.edge_text = QLabel("")
+        self.edge_text.setWordWrap(True)
+        self.edge_text.setTextFormat(Qt.TextFormat.RichText)
+        self.edge_text.setOpenExternalLinks(False)
+        self.edge_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.edge_text.linkActivated.connect(lambda url: open_external_link(url, self))
+        self.edge_cut = Button("Cortar relação", "danger", "x", size="sm", on_click=self._cut_selected_edge)
+        row = QHBoxLayout()
+        row.addWidget(self.edge_text, 1)
+        row.addWidget(self.edge_cut, 0, Qt.AlignmentFlag.AlignTop)
+        self.edge_panel.body.addLayout(row)
+        self.edge_panel.hide()
+        self.layout_.addWidget(self.edge_panel)
         self.layout_.addWidget(self.view, 1)
         self.layout_.addWidget(label(
-            "Duplo clique abre a entidade · botão direito: focar, criar relação, ocultar · roda do mouse: zoom · "
+            "Duplo clique abre a entidade · clique numa linha para ver a relação · botão direito: focar, "
+            "criar relação, ocultar, cortar relação · roda do mouse: zoom · "
             "arraste o fundo para mover. Linha contínua = verificada; tracejada = relatada; "
             "pontilhada = hipótese; vermelha = conflito.", "Muted", wrap=True))
 
@@ -269,7 +342,62 @@ class GraphPage(Page):
         if self.view.scene().items():
             self.reload(keep_positions=True)
 
+    def _clear_selection_info(self) -> None:
+        self.sel_info.setText("")
+        self.edge_panel.hide()
+
+    def _edge_item(self, rid: str) -> EdgeItem | None:
+        return next((i for i in self.view.scene().items() if isinstance(i, EdgeItem) and i.data_["id"] == rid), None)
+
+    def show_edge(self, rid: str) -> None:
+        """Mostra tipo, status e fontes da relação selecionada."""
+        try:
+            rel = self.store.get_relation(rid)
+        except NexusError as exc:
+            notify(self, exc.user_message, "info")
+            return
+        sources = self.store.evidence_for("relation", rid)
+        lines = [f"<b>{html.escape(rel['phrase'])}</b>",
+                 f"Status: {html.escape(STATUS_LABELS.get(rel['epistemic_status'], rel['epistemic_status']))}"
+                 f" · {len(sources)} fonte(s)"]
+        if rel.get("valid_from") or rel.get("valid_to"):
+            lines.append(f"Validade: {html.escape(rel.get('valid_from') or '…')} – "
+                         f"{html.escape(rel.get('valid_to') or 'atual')}")
+        lines += [evidence_line_html(v) for v in sources]
+        self.edge_text.setText("<br>".join(lines))
+        self.edge_cut.setProperty("relation_id", rid)
+        self.edge_panel.show()
+        self.sel_info.setText(f"Relação selecionada: {rel['phrase']}")
+        item = self._edge_item(rid)
+        if item is not None and not item.isSelected():
+            self.view.scene().clearSelection()
+            item.setSelected(True)
+
+    def _cut_selected_edge(self) -> None:
+        item = self._edge_item(str(self.edge_cut.property("relation_id") or ""))
+        if item is not None:
+            self.cut_edge(item)
+
+    def cut_edge(self, edge: EdgeItem) -> None:
+        """Corta a relação e tira só esta linha do grafo; os nós ficam onde estão."""
+        if not cut_relation_flow(self.store, edge.data_["id"], self):
+            return
+        self.remove_edge(edge)
+        self._clear_selection_info()
+        self.changed.emit()
+        notify(self, "Relação cortada e enviada para a Lixeira. As entidades continuam no grafo.", "success")
+
+    def remove_edge(self, edge: EdgeItem) -> None:
+        for node in (edge.a, edge.b):
+            if edge in node.edges:
+                node.edges.remove(edge)
+        self.view.scene().removeItem(edge)
+        nodes = sum(isinstance(i, NodeItem) for i in self.view.scene().items())
+        edges = sum(isinstance(i, EdgeItem) for i in self.view.scene().items())
+        self.info.setText(f"{nodes} entidades · {edges} relações")
+
     def _selected(self, eid: str) -> None:
+        self.edge_panel.hide()
         e = guarded(self, lambda: self.store.get_entity(eid))
         if e:
             self.sel_info.setText(f"Selecionado: {e['display_name']} ({e['type_label']})")
@@ -326,7 +454,9 @@ class GraphPage(Page):
             scene.addItem(it)
             items[n["id"]] = it
         for e in edges:
-            scene.addItem(EdgeItem(e, items[e["source_id"]], items[e["target_id"]], tokens.current().graph_edge))
+            edge = EdgeItem(e, items[e["source_id"]], items[e["target_id"]], tokens.current().graph_edge)
+            edge.view = self.view
+            scene.addItem(edge)
         mode = "Foco" if self.view.center_id else "Visão geral"
         trunc = f" (limite atingido: mostrando os {len(nodes)} mais conectados)" if data["truncated"] else ""
         self.info.setText(f"{mode}: {len(nodes)} de {data['total_entities']} entidades · "

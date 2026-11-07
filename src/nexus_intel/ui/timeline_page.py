@@ -35,8 +35,10 @@ from nexus_intel.ui.design.components import (
     text,
 )
 from nexus_intel.ui.design.table import Column, DataTable
+from nexus_intel.ui.links import open_external_link, safe_http_url
 
 _ROLE = Qt.ItemDataRole.UserRole
+_URL_ROLE = Qt.ItemDataRole.UserRole + 1
 RELATION_START = "Início de relação"
 RELATION_END = "Fim de relação"
 
@@ -148,14 +150,19 @@ class TimelinePage(Page):
         self.evidence = QListWidget()
         self.evidence.setMaximumHeight(110)
         self.evidence.itemDoubleClicked.connect(self._open_from_evidence)
+        self.evidence.currentItemChanged.connect(lambda *_: self._sync_link_btn())
         nav = QHBoxLayout()
         self.prev_btn = Button("Anterior", "secondary", "chevron-left", on_click=lambda: self._step(-1), size="sm")
         self.next_btn = Button("Próximo", "secondary", "chevron-right", on_click=lambda: self._step(1), size="sm")
         self.open_btn = Button("Abrir entidade", "primary", "external-link", size="sm",
                                on_click=self._open_selected)
+        self.link_btn = Button("Abrir link da fonte", "secondary", "external-link", size="sm",
+                               on_click=self._open_link, tooltip="Abre o endereço da fonte selecionada no navegador")
+        self.link_btn.setEnabled(False)
         for b in (self.prev_btn, self.next_btn):
             nav.addWidget(b)
         nav.addStretch(1)
+        nav.addWidget(self.link_btn)
         nav.addWidget(self.open_btn)
         self.detail.add(self.detail_title)
         self.detail.body.addLayout(self.detail_status)
@@ -261,9 +268,11 @@ class TimelinePage(Page):
             rel = f"[{v['reliability']}] " if v["reliability"] else ""
             bad = " — desacreditada" if v["is_discredited"] else ""
             ex = f" — “{v['excerpt']}”" if v["excerpt"] else ""
-            it = QListWidgetItem(f"{rel}{v['title']}{bad}{ex}")
-            it.setToolTip(it.text())
+            url = safe_http_url(v.get("url"))
+            it = QListWidgetItem(f"{rel}{v['title']}{bad}{ex}" + ("  ↗" if url else ""))
+            it.setToolTip(it.text() + (f"\nLink: {url}" if url else ""))
             it.setData(_ROLE, ev.entity_id)
+            it.setData(_URL_ROLE, url)
             self.evidence.addItem(it)
         if not self.evidence.count():
             self.evidence.addItem("Sem fonte registrada para este evento.")
@@ -286,6 +295,15 @@ class TimelinePage(Page):
         ev = self._selected()
         if ev:
             self.open_entity.emit(ev.entity_id)
+
+    def _sync_link_btn(self) -> None:
+        item = self.evidence.currentItem()
+        self.link_btn.setEnabled(bool(item is not None and item.data(_URL_ROLE)))
+
+    def _open_link(self) -> None:
+        item = self.evidence.currentItem()
+        if item is not None:
+            open_external_link(item.data(_URL_ROLE), self)
 
     def _open_from_evidence(self, item: QListWidgetItem) -> None:
         eid = item.data(_ROLE)

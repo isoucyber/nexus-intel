@@ -2,6 +2,16 @@
 
 Formato baseado em Keep a Changelog; versões seguem SemVer.
 
+## [0.3.3] — 2026-11-07
+### Adicionado
+- Cortar relação na ficha da entidade (botão e menu) e no grafo (menu da linha), com confirmação; entidades preservadas.
+- Lixeira com aba de relações: restaurar ou excluir de vez (evidências removidas, sem órfãos).
+- Grafo: linhas selecionáveis com painel de detalhes; corte remove só a linha e mantém os nós no lugar.
+- Links http/https clicáveis em fontes, atributos de link, evidências, painel do grafo e linha do tempo
+  (`QDesktopServices.openUrl` com validação; só abre por clique).
+### Corrigido
+- Histórico ordenava pelo ID aleatório dentro do mesmo segundo.
+
 ## [0.3.2] — 2026-11-07
 ### Adicionado
 - Números do Início e barras de “Entidades por tipo” clicáveis, com mouse e teclado.

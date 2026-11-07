@@ -1,12 +1,15 @@
-## NEXUS INTEL 0.3.2 — números clicáveis, nomes obrigatórios e exclusão de fontes
+## NEXUS INTEL 0.3.3 — cortar relações e links clicáveis
 
 **Baixe** `NexusIntel-Setup-*.exe` abaixo e execute. Se o Windows SmartScreen avisar, clique em **Mais informações → Executar assim mesmo**. Seus usuários e projetos continuam funcionando.
 
 ### Novidades
-- **Números do Início clicáveis**: Entidades, Relações, Afirmações, Fontes e Na lixeira levam direto ao lugar da informação. Clicar num tipo em “Entidades por tipo” abre a lista já filtrada por ele. Funciona com mouse e teclado (Tab + Enter)
-- **Excluir fonte**: na lista de Fontes e na tela de edição da fonte. A confirmação diz quantas afirmações e relações estão ligadas a ela; os vínculos são removidos, as afirmações e relações continuam e, se ficarem sem nenhuma fonte, aparecem em Qualidade
-- **Nome obrigatório**: fontes, entidades, projetos, tipos e campos não podem ser criados nem salvos com nome vazio ou só com espaços. O botão de salvar fica desabilitado e o campo mostra o motivo
+- **Cortar relação**: pelo botão direito na relação (na ficha da entidade ou numa linha do grafo) ou pelo botão “Cortar relação”. A confirmação mostra as duas pontas; as entidades nunca são apagadas
+- **Relações na lixeira**: relações cortadas ficam na Lixeira, de onde podem ser restauradas ou excluídas de vez (junto com as fontes ligadas a elas, sem deixar vínculos órfãos)
+- **Grafo**: clique numa linha para ver o tipo, o status e as fontes da relação; ao cortar, a linha some na hora e os nós ficam no lugar
+- **Links clicáveis**: endereços em fontes e atributos (Site, URL do perfil…) abrem no navegador padrão do Windows ao clicar. Só http e https são aceitos; link inválido mostra um aviso
+
+### Segurança
+- Nenhum link abre sem um clique seu; o restante do aplicativo continua 100% offline
 
 ### Correções
-- Abrir uma entidade que foi excluída definitivamente mostra um aviso, em vez de abrir uma aba vazia
-- Editar uma fonte apagando o título deixava a fonte sem nome
+- O histórico de uma entidade às vezes mostrava duas alterações do mesmo segundo fora de ordem

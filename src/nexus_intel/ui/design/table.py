@@ -28,7 +28,7 @@ Index = QModelIndex | QPersistentModelIndex
 class Column:
     key: str
     title: str
-    kind: str = "text"  # text, mono, number, reltime, datetime, entity, status, muted
+    kind: str = "text"  # text, mono, number, reltime, datetime, entity, status, muted, link
     width: int | None = None
     stretch: bool = False
     getter: Callable[[Row], Any] | None = None
@@ -98,6 +98,8 @@ class RecordModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return self._display(col, value)
         if role == Qt.ItemDataRole.ToolTipRole:
+            if col.kind == "link" and value:
+                return f"Clique para abrir no navegador: {value}"
             if col.kind in ("reltime", "datetime"):
                 return fmt.absolute(value)
             shown = self._display(col, value)
@@ -109,6 +111,8 @@ class RecordModel(QAbstractTableModel):
                 return assets.qcolor(t.text_muted)
             if col.kind == "mono":
                 return assets.qcolor(t.text_secondary)
+            if col.kind == "link":
+                return assets.qcolor(t.accent_text)
             return None
         if role == Qt.ItemDataRole.DecorationRole:
             if col.kind == "entity":
@@ -117,6 +121,11 @@ class RecordModel(QAbstractTableModel):
             if col.kind == "status":
                 return assets.pixmap(assets.STATUS_ICONS.get(str(value), "circle"), t.status_color(str(value)), 14)
             return None
+        if role == Qt.ItemDataRole.FontRole and col.kind == "link" and value:
+            f = QFont(assets.font_family("ui"))
+            f.setPixelSize(t.font_px("sm"))
+            f.setUnderline(True)
+            return f
         if role == Qt.ItemDataRole.FontRole and col.kind == "mono":
             f = QFont(assets.font_family("mono"))
             f.setPixelSize(t.font_px("xs"))
@@ -148,6 +157,7 @@ class DataTable(QTableView):
     """Tabela pronta: linhas de altura fixa, cabeçalho em caixa alta, reticências e dicas."""
 
     row_activated = Signal(dict)
+    link_clicked = Signal(str)  # clique numa célula de coluna do tipo "link"
 
     def __init__(self, columns: Sequence[Column], page_size: int = 200, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -176,7 +186,9 @@ class DataTable(QTableView):
                 self.setColumnWidth(i, c.width)
             else:
                 hh.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
-        self.doubleClicked.connect(lambda idx: self.row_activated.emit(self.model_.row(idx.row())))
+        self.doubleClicked.connect(self._double_clicked)
+        self.clicked.connect(self._clicked)
+        self.setMouseTracking(True)
         self._sync(tokens.current())
         on_theme(self, self._sync)
 
@@ -184,6 +196,27 @@ class DataTable(QTableView):
         self.verticalHeader().setDefaultSectionSize(max(26, round(34 * t.density)))
         self.setIconSize(QSize(16, 16))
         self.viewport().update()
+
+    def _link_at(self, idx: QModelIndex) -> str | None:
+        if not idx.isValid() or self.model_.columns[idx.column()].kind != "link":
+            return None
+        value = self.model_.columns[idx.column()].value(self.model_.row(idx.row()))
+        return str(value) if value else None
+
+    def _clicked(self, idx: QModelIndex) -> None:
+        url = self._link_at(idx)
+        if url:
+            self.link_clicked.emit(url)
+
+    def _double_clicked(self, idx: QModelIndex) -> None:
+        if self._link_at(idx):
+            return  # o clique simples já abriu o link; não abre a ficha junto
+        self.row_activated.emit(self.model_.row(idx.row()))
+
+    def mouseMoveEvent(self, event: Any) -> None:  # noqa: N802
+        over_link = self._link_at(self.indexAt(event.position().toPoint())) is not None
+        self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if over_link else Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(event)
 
     def keyPressEvent(self, event: Any) -> None:  # noqa: N802
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.currentIndex().isValid():

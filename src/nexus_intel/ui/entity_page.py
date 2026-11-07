@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+
 import json
 from typing import Any
 
@@ -12,6 +14,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
     QLineEdit,
     QMenu,
     QPlainTextEdit,
@@ -37,7 +40,8 @@ from nexus_intel.ui.common import (
     hbox,
     label,
 )
-from nexus_intel.ui.dialogs import ClaimDialog, EvidenceDialog, RelationDialog
+from nexus_intel.ui.dialogs import ClaimDialog, EvidenceDialog, RelationDialog, cut_relation_flow
+from nexus_intel.ui.links import link_html, open_external_link, safe_http_url
 from nexus_intel.ui.design import assets, tokens
 from nexus_intel.ui.design.components import (
     require_text,
@@ -47,9 +51,20 @@ from nexus_intel.ui.design.components import (
     EntityAvatar,
     SectionHeader,
     StatusBadge,
+    notify,
 )
 
 _ROLE = Qt.ItemDataRole.UserRole
+
+
+def evidence_line_html(v: dict[str, Any]) -> str:
+    """Uma fonte em HTML seguro; o título vira link quando a fonte tem URL http/https."""
+    rel = f"[{html.escape(v['reliability'])}] " if v.get("reliability") else ""
+    title = link_html(v.get("url"), v["title"]) if v.get("url") else html.escape(v["title"])
+    bad = " — DESACREDITADA" if v.get("is_discredited") else ""
+    ex = f" — “{html.escape(v['excerpt'])}”" if v.get("excerpt") else ""
+    loc = f" ({html.escape(v['locator'])})" if v.get("locator") else ""
+    return f"• {rel}{title}{bad}{ex}{loc}"
 
 
 def _item(text: str, data: Any = None, color: str | None = None) -> QTableWidgetItem:
@@ -190,9 +205,12 @@ class EntityPage(Page):
         self.claims.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.claims.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.claims.customContextMenuRequested.connect(self._claim_menu)
-        self.claims.itemDoubleClicked.connect(lambda it, _c: self._edit_claim(it))
+        self.claims.itemDoubleClicked.connect(self._claim_double_clicked)
+        self.claims.itemClicked.connect(self._claim_clicked)
+        self.claims.setMouseTracking(True)
+        self.claims.itemEntered.connect(self._claim_hover)
         lay.addWidget(self.claims, 1)
-        self.evidence_box = label("", "Muted", wrap=True)
+        self.evidence_box = self._evidence_label()
         lay.addWidget(self.evidence_box)
         self.claims.currentItemChanged.connect(lambda it, _p: self._show_evidence("claim", it))
         return w
@@ -232,13 +250,50 @@ class EntityPage(Page):
                 st_color = tokens.current().status_color(status)
                 child.setForeground(1, assets.qcolor(st_color))
                 child.setIcon(1, assets.icon(assets.STATUS_ICONS.get(status, "circle"), st_color, 14))
-                child.setData(0, _ROLE, {"claim": c})
+                url = safe_http_url(c.get("value_text")) if cv.datatype == "url" else None
+                if url:  # link: cor de destaque, sublinhado, clique abre no navegador
+                    child.setForeground(0, assets.qcolor(tokens.current().accent_text))
+                    f = child.font(0)
+                    f.setUnderline(True)
+                    child.setFont(0, f)
+                    child.setToolTip(0, f"Clique para abrir no navegador: {url}")
+                child.setData(0, _ROLE, {"claim": c, "url": url})
                 parent.addChild(child)
             self.claims.addTopLevelItem(parent)
             parent.setExpanded(True)
         if self.claims.topLevelItemCount() == 0:
             self.claims.addTopLevelItem(QTreeWidgetItem(["Nenhum atributo registrado. Use “+ Atributo”."]))
         self.claims.resizeColumnToContents(1)
+
+    @staticmethod
+    def _url_of(item: QTreeWidgetItem | None) -> str | None:
+        data = item.data(0, _ROLE) if item else None
+        return data.get("url") if isinstance(data, dict) else None
+
+    def _claim_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        url = self._url_of(item)
+        if url and column == 0:
+            open_external_link(url, self)
+
+    def _claim_double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        if self._url_of(item) and column == 0:
+            return  # o clique já abriu o link; editar fica no menu do botão direito
+        self._edit_claim(item)
+
+    def _claim_hover(self, item: QTreeWidgetItem, column: int) -> None:
+        link = self._url_of(item) is not None and column == 0
+        self.claims.viewport().setCursor(Qt.CursorShape.PointingHandCursor if link else Qt.CursorShape.ArrowCursor)
+
+    def _evidence_label(self) -> QLabel:
+        """Lista de fontes com links clicáveis (abrem no navegador só ao clicar)."""
+        lb = QLabel("")
+        lb.setProperty("role", "muted")
+        lb.setWordWrap(True)
+        lb.setTextFormat(Qt.TextFormat.RichText)
+        lb.setOpenExternalLinks(False)
+        lb.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        lb.linkActivated.connect(lambda url: open_external_link(url, self))
+        return lb
 
     def _claim_of(self, item: QTreeWidgetItem | None) -> dict[str, Any] | None:
         data = item.data(0, _ROLE) if item else None
@@ -265,6 +320,9 @@ class EntityPage(Page):
         if not c:
             return
         m = QMenu(self)
+        url = self._url_of(item)
+        if url:
+            m.addAction("Abrir link no navegador", lambda: open_external_link(url, self))
         m.addAction("Editar…", lambda: self._edit_claim(item))
         m.addAction("Adicionar fonte…", lambda: self._add_evidence("claim", c["id"]))
         m.addAction("Marcar como preferido", lambda: (guarded(self, lambda: self.store.set_preferred_claim(c["id"])),
@@ -297,22 +355,19 @@ class EntityPage(Page):
         if not ev:
             box.setText("Sem fonte. Clique com o botão direito para adicionar.")
             return
-        lines = []
-        for v in ev:
-            rel = f"[{v['reliability']}] " if v["reliability"] else ""
-            bad = " — DESACREDITADA" if v["is_discredited"] else ""
-            ex = f" — “{v['excerpt']}”" if v["excerpt"] else ""
-            loc = f" ({v['locator']})" if v["locator"] else ""
-            lines.append(f"• {rel}{v['title']}{bad}{ex}{loc}")
-        box.setText("Fontes:\n" + "\n".join(lines))
+        box.setText("Fontes:<br>" + "<br>".join(evidence_line_html(v) for v in ev))
 
     # --------------------------------------------------------- relações
     def _build_relations(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
+        self.cut_btn = button("Cortar relação", self._cut_selected, "Danger", icon="x",
+                              tip="Cortar a relação selecionada (vai para a Lixeira; as entidades ficam)")
+        self.cut_btn.setEnabled(False)
         lay.addWidget(SectionHeader("", "No grafo: linha contínua = verificada; tracejada = relatada; "
                                     "pontilhada = hipótese; vermelha = conflitante.",
-                                    [button("Relação", self._add_relation, "Primary", icon="plus")], role="h3"))
+                                    [self.cut_btn, button("Relação", self._add_relation, "Primary", icon="plus")],
+                                    role="h3"))
         self.relations = QTreeWidget()
         self.relations.setHeaderLabels(["Relação", "Entidade", "Status", "Fontes", "Validade", "Descrição"])
         self.relations.setRootIsDecorated(False)
@@ -323,9 +378,11 @@ class EntityPage(Page):
         self.relations.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.relations.customContextMenuRequested.connect(self._relation_menu)
         lay.addWidget(self.relations, 1)
-        self.rel_evidence = label("", "Muted", wrap=True)
+        self.rel_evidence = self._evidence_label()
         lay.addWidget(self.rel_evidence)
         self.relations.currentItemChanged.connect(lambda it, _p: self._show_evidence("relation", it))
+        self.relations.currentItemChanged.connect(
+            lambda it, _p: self.cut_btn.setEnabled(bool(it is not None and it.data(0, _ROLE))))
         return w
 
     def _fill_relations(self) -> None:
@@ -360,17 +417,25 @@ class EntityPage(Page):
         m.addAction("Editar relação…", lambda: self._edit_relation(r))
         m.addAction("Adicionar fonte…", lambda: self._add_evidence("relation", r["id"]))
         m.addSeparator()
-        m.addAction("Mover relação para a lixeira", lambda: self._trash_relation(r))
+        m.addAction(assets.icon("x", tokens.current().danger), "Cortar relação…", lambda: self._cut_relation(r))
         m.exec(self.relations.viewport().mapToGlobal(pos))
 
     def _edit_relation(self, r: dict[str, Any]) -> None:
         if RelationDialog(self.store, self.entity_id, self, relation=r).exec():
             self.refresh()
 
-    def _trash_relation(self, r: dict[str, Any]) -> None:
-        guarded(self, lambda: self.store.set_relation_status(r["id"], "trashed"))
-        self.refresh()
-        self.changed.emit()
+    def _cut_selected(self) -> None:
+        item = self.relations.currentItem()
+        r = item.data(0, _ROLE) if item else None
+        if r:
+            self._cut_relation(r)
+
+    def _cut_relation(self, r: dict[str, Any]) -> None:
+        if cut_relation_flow(self.store, r["id"], self):
+            self.refresh()
+            self.changed.emit()
+            notify(self, f"Relação cortada: {r['source_name']} {r['label']} {r['target_name']}. "
+                         "Ela está na Lixeira.", "success")
 
     # --------------------------------------------------------- conexões
     def _build_connections(self) -> QWidget:

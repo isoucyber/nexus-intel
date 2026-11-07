@@ -47,6 +47,7 @@ from nexus_intel.ui.design.table import Column, DataTable
 from nexus_intel.ui.dialogs import NewEntityDialog, SourceDialog, delete_source_flow
 from nexus_intel.ui.entity_page import EntityPage
 from nexus_intel.ui.graph_view import GraphPage
+from nexus_intel.ui.links import open_external_link
 from nexus_intel.ui.module_pages import SPECS, BackupPage, ImportExportPage, make_pending
 from nexus_intel.ui.timeline_page import TimelinePage
 
@@ -322,10 +323,11 @@ class SourcesPage(Page):
             Column("kind", "Tipo", "muted", width=150, getter=lambda s: SOURCE_KINDS.get(s["kind"], s["kind"])),
             Column("reliability", "Confiab.", width=80, getter=lambda s: s["reliability"] or "—"),
             Column("uses", "Usos", "number", width=70),
-            Column("url", "URL", "mono", width=220),
+            Column("url", "URL", "link", width=240),
             Column("accessed_at", "Consultada", "muted", width=110),
         ])
         self.table.row_activated.connect(lambda s: self._edit(s["id"]))
+        self.table.link_clicked.connect(lambda url: open_external_link(url, self))
         self.table.selectionModel().currentRowChanged.connect(lambda *_: self._usages())
         self.empty = EmptyState("library", "Nenhuma fonte cadastrada",
                                 "Fontes são a base de tudo: cada afirmação deve apontar de onde veio.",
@@ -466,51 +468,98 @@ class QualityPage(Page):
 
 # ------------------------------------------------------------------- lixeira
 class TrashPage(Page):
+    """Lixeira com duas abas: entidades e relações cortadas. Os botões agem na aba aberta."""
+
     changed = Signal()
 
     def __init__(self, store: ProjectStore) -> None:
         super().__init__()
         self.store = store
         self.layout_.addWidget(SectionHeader(
-            "Lixeira", "Itens na lixeira não aparecem na busca, no grafo nem nas listas. Restaurar devolve "
-            "relações e afirmações.",
+            "Lixeira", "Itens na lixeira não aparecem na busca, no grafo nem nas listas. Restaurar uma entidade "
+            "devolve as relações e afirmações dela; uma relação cortada volta ao grafo.",
             [button("Restaurar", self._restore, "Primary", icon="undo-2"),
              button("Excluir definitivamente", self._purge, "Danger", icon="x"),
              button("Esvaziar lixeira", self._empty, "Danger", icon="trash-2")]))
         self.table = DataTable([Column("display_name", "Nome", "entity", stretch=True),
                                 Column("type_label", "Tipo", "muted", width=140),
                                 Column("updated_at", "Na lixeira desde", "reltime", width=140)])
-        self.empty = EmptyState("trash-2", "A lixeira está vazia", "Itens excluídos ficam aqui até você "
-                                "restaurar ou excluir definitivamente.")
+        self.empty = EmptyState("trash-2", "Nenhuma entidade na lixeira", "Entidades excluídas ficam aqui até "
+                                "você restaurar ou excluir definitivamente.")
         self.stack = _stack(self.table, self.empty)
-        self.layout_.addWidget(self.stack, 1)
+        self.rel_table = DataTable([Column("phrase", "Relação cortada", stretch=True),
+                                    Column("ends", "Pontas", "muted", width=200,
+                                           getter=lambda r: "entidade na lixeira" if "trashed" in
+                                           (r["source_status"], r["target_status"]) else "ativas"),
+                                    Column("updated_at", "Cortada", "reltime", width=120)])
+        self.rel_empty = EmptyState("network", "Nenhuma relação cortada",
+                                    "Relações cortadas na ficha da entidade ou no grafo ficam aqui. As entidades "
+                                    "das pontas nunca são apagadas.")
+        self.rel_stack = _stack(self.rel_table, self.rel_empty)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.stack, assets.icon("database"), "Entidades")
+        self.tabs.addTab(self.rel_stack, assets.icon("network"), "Relações")
+        self.layout_.addWidget(self.tabs, 1)
 
     def refresh(self) -> None:
         rows = guarded(self, lambda: self.store.list_entities(status="trashed", limit=1000)) or []
         self.table.set_rows(rows)
         self.stack.setCurrentWidget(self.table if rows else self.empty)
+        rels = guarded(self, self.store.list_trashed_relations) or []
+        self.rel_table.set_rows(rels)
+        self.rel_stack.setCurrentWidget(self.rel_table if rels else self.rel_empty)
+        self.tabs.setTabText(0, f"Entidades ({len(rows)})")
+        self.tabs.setTabText(1, f"Relações ({len(rels)})")
 
-    def _ids(self) -> list[str]:
-        return [r["id"] for r in self.table.selected_rows()]
+    def _on_relations(self) -> bool:
+        return self.tabs.currentIndex() == 1
+
+    def _selected(self) -> list[dict[str, Any]]:
+        table = self.rel_table if self._on_relations() else self.table
+        rows = table.selected_rows()
+        if not rows:
+            notify(self, "Selecione um ou mais itens na lista primeiro.", "info")
+        return rows
 
     def _restore(self) -> None:
-        ids = self._ids()
-        for eid in ids:
-            guarded(self, lambda eid=eid: self.store.restore_entity(eid))
-        if ids:
-            self.refresh()
-            self.changed.emit()
-            notify(self, f"{len(ids)} item(ns) restaurado(s).", "success")
+        rows = self._selected()
+        if not rows:
+            return
+        if self._on_relations():
+            for r in rows:
+                guarded(self, lambda r=r: self.store.restore_relation(r["id"]))
+            msg = f"{len(rows)} relação(ões) restaurada(s)."
+        else:
+            for r in rows:
+                guarded(self, lambda r=r: self.store.restore_entity(r["id"]))
+            msg = f"{len(rows)} entidade(s) restaurada(s)."
+        self.refresh()
+        self.changed.emit()
+        notify(self, msg, "success")
 
     def _purge(self) -> None:
-        ids = self._ids()
-        if ids and confirm(self, "Excluir definitivamente", "Esta ação não pode ser desfeita. Continuar?", True):
-            for eid in ids:
-                guarded(self, lambda eid=eid: self.store.delete_entity_permanently(eid))
+        rows = self._selected()
+        if not rows:
+            return
+        if self._on_relations():
+            names = "\n".join(f"• {r['phrase']}" for r in rows[:5]) + ("\n…" if len(rows) > 5 else "")
+            text = (f"Excluir definitivamente {len(rows)} relação(ões)?\n\n{names}\n\nAs fontes ligadas a elas "
+                    "são desvinculadas. As entidades das pontas continuam. Esta ação não pode ser desfeita.")
+            action = self.store.delete_relation_permanently
+        else:
+            names = "\n".join(f"• {r['display_name']}" for r in rows[:5]) + ("\n…" if len(rows) > 5 else "")
+            text = f"Excluir definitivamente {len(rows)} entidade(s)?\n\n{names}\n\nEsta ação não pode ser desfeita."
+            action = self.store.delete_entity_permanently
+        if confirm(self, "Excluir definitivamente", text, True):
+            for r in rows:
+                guarded(self, lambda r=r: action(r["id"]))
             self.refresh()
+            self.changed.emit()
+            notify(self, f"{len(rows)} item(ns) excluído(s) definitivamente.", "success")
 
     def _empty(self) -> None:
-        if confirm(self, "Esvaziar lixeira", "Excluir definitivamente tudo que está na lixeira?", True):
+        if confirm(self, "Esvaziar lixeira", "Excluir definitivamente todas as entidades e relações da lixeira? "
+                   "Esta ação não pode ser desfeita.", True):
             n = guarded(self, self.store.empty_trash) or 0
             self.refresh()
             self.changed.emit()
@@ -778,6 +827,7 @@ class Workspace(QWidget):
         QShortcut(QKeySequence("Ctrl+G"), self, activated=lambda: self.go("graph"))
         QShortcut(QKeySequence("Ctrl+W"), self, activated=lambda: self._close_tab(self.tabs.currentIndex()))
         self._loaded: set[str] = set()
+        self._graph_dirty = False
         self._current = "home"
         on_theme(self, lambda _t: self._label_section_tab())
         self.go("home" if store.count_entities() else "entities")
@@ -846,7 +896,10 @@ class Workspace(QWidget):
         self._label_section_tab()
         if key == "graph":
             if key not in self._loaded:
-                page.reload()
+                page.reload()  # primeira visita: layout completo
+            elif self._graph_dirty:
+                page.reload(keep_positions=True)  # dados mudaram em outra tela: mantém os nós no lugar
+            self._graph_dirty = False
         elif key == "entities":
             page.reset()
         else:
@@ -892,7 +945,7 @@ class Workspace(QWidget):
 
     def _data_changed(self) -> None:
         # Marca páginas para recarregar ao voltar; atualiza a visível agora.
-        self._loaded.discard("graph")
+        self._graph_dirty = True
         for i in range(1, self.tabs.count()):
             w = self.tabs.widget(i)
             if isinstance(w, EntityPage) and w is not self.tabs.currentWidget():
