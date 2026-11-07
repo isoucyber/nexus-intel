@@ -339,7 +339,17 @@ class GraphPage(Page):
 
     def _retheme(self, t: tokens.Tokens) -> None:
         self.view.setBackgroundBrush(assets.qcolor(t.graph_bg))
-        if self.view.scene().items():
+        if not self.view.scene().items():
+            return
+        if self.isVisible():
+            self.reload(keep_positions=True)
+        else:
+            self._restyle_pending = True  # oculto: aplica as cores novas quando for aberto
+
+    def showEvent(self, event: Any) -> None:  # noqa: N802
+        super().showEvent(event)
+        if getattr(self, "_restyle_pending", False):
+            self._restyle_pending = False
             self.reload(keep_positions=True)
 
     def _clear_selection_info(self) -> None:

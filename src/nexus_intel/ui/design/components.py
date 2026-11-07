@@ -41,6 +41,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from shiboken6 import isValid
+
 from nexus_intel.ui.design import assets, tokens
 from nexus_intel.ui.design.color import ensure_contrast
 from nexus_intel.ui.design.manager import theme_manager
@@ -54,6 +56,8 @@ def _on_theme(widget: QObject, slot: Callable[[Tokens], Any]) -> None:
 
     def guarded(t: Tokens) -> None:
         try:
+            if not isValid(widget) or widget.signalsBlocked():
+                return  # tela desligada (projeto fechado ou bloqueado): não reage mais
             slot(t)
         except RuntimeError:  # objeto C++ já destruído
             _safe_disconnect(guarded)
