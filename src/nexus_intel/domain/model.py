@@ -6,6 +6,8 @@ import re
 import unicodedata
 from enum import StrEnum
 
+from nexus_intel.domain.errors import NexusError
+
 
 class Epistemic(StrEnum):
     VERIFIED = "verified"
@@ -60,6 +62,14 @@ SOURCE_KINDS = {
 
 _TITLES = {"dr", "dra", "sr", "sra", "prof", "profa", "eng", "me", "mr", "mrs", "ms"}
 _SPACES = re.compile(r"\s+")
+
+
+def require_name(value: object, what: str = "O nome") -> str:
+    """Nome obrigatório: remove espaços das pontas e recusa vazio ou só espaços."""
+    name = str(value or "").strip()
+    if not name:
+        raise NexusError(f"{what} não pode ficar vazio.")
+    return name
 
 
 def strip_accents(text: str) -> str:

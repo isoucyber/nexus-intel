@@ -12,6 +12,7 @@ from nexus_intel.application.session import Session, now_iso
 from nexus_intel.domain.catalog import TEMPLATES
 from nexus_intel.domain.errors import NexusError, ProjectLocked, ProjectNotFound
 from nexus_intel.domain.ids import new_ulid
+from nexus_intel.domain.model import require_name
 from nexus_intel.infrastructure.crypto.keys import SecretKey, hkdf, unwrap, wrap
 from nexus_intel.infrastructure.crypto.vault import CRYPTO_FULL
 from nexus_intel.infrastructure.db.connection import open_database
@@ -79,9 +80,7 @@ class ProjectManager:
         purpose: str = "",
         legal_basis: str = "",
     ) -> ProjectInfo:
-        name = name.strip()
-        if not name:
-            raise NexusError("Dê um nome ao projeto.")
+        name = require_name(name, "O nome do projeto")
         if template not in TEMPLATES:
             raise NexusError("Modelo de projeto desconhecido.")
         pid = new_ulid()
@@ -179,8 +178,9 @@ class ProjectManager:
 
     # --- manutenção ------------------------------------------------------
     def update_appearance(self, project_id: str, name: str, color: str) -> None:
+        name = require_name(name, "O nome do projeto")
         self.session.app_db.execute(
-            "UPDATE project_registry SET name=?, color=? WHERE id=?", (name.strip(), color, project_id)
+            "UPDATE project_registry SET name=?, color=? WHERE id=?", (name, color, project_id)
         )
 
     def delete(self, project_id: str) -> None:

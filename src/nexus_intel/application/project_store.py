@@ -19,6 +19,7 @@ from nexus_intel.domain.dates import from_storage, parse_fuzzy_date
 from nexus_intel.domain.errors import NexusError
 from nexus_intel.domain.ids import new_ulid
 from nexus_intel.domain.model import (
+    require_name,
     IDENTIFIER_SCHEMES,
     Epistemic,
     normalize_identifier,
@@ -226,6 +227,7 @@ class ProjectStore:
         )
 
     def add_field(self, type_id: str, label: str, datatype: str = "text", conflict_rule: str = "single") -> str:
+        label = require_name(label, "O nome do campo")
         key = re.sub(r"[^a-z0-9]+", "_", strip_accents(label).lower()).strip("_") or "campo"
         fid = new_ulid()
         with Tx(self.conn):
@@ -239,6 +241,7 @@ class ProjectStore:
         return fid
 
     def create_entity_type(self, label: str, parent_key: str | None = None, color: str = "#94a3b8") -> str:
+        label = require_name(label, "O nome do tipo")
         key = re.sub(r"[^a-z0-9]+", "_", strip_accents(label).lower()).strip("_")
         parent = self.entity_type(parent_key)["id"] if parent_key else None
         tid = new_ulid()
@@ -271,9 +274,7 @@ class ProjectStore:
         aliases: list[str] | None = None,
         identifiers: list[tuple[str, str]] | None = None,
     ) -> str:
-        name = display_name.strip()
-        if not name:
-            raise NexusError("Informe um nome.")
+        name = require_name(display_name)
         t = self.entity_type(type_key)
         eid, ts = new_ulid(), now_iso()
         with Tx(self.conn):
@@ -326,9 +327,7 @@ class ProjectStore:
         if bad:
             raise ValueError(f"campos não editáveis: {bad}")
         if "display_name" in changes:
-            changes["display_name"] = str(changes["display_name"]).strip()
-            if not changes["display_name"]:
-                raise NexusError("O nome não pode ficar vazio.")
+            changes["display_name"] = require_name(changes["display_name"])
             changes["display_name_norm"] = normalize_name(changes["display_name"])
         if "importance" in changes:
             changes["importance"] = max(1, min(5, int(changes["importance"])))
@@ -808,14 +807,13 @@ class ProjectStore:
         reliability: str | None = None,
         note: str = "",
     ) -> str:
-        if not title.strip():
-            raise NexusError("Dê um título à fonte.")
+        title = require_name(title, "O título da fonte")
         sid, ts = new_ulid(), now_iso()
         with Tx(self.conn):
             self.conn.execute(
                 "INSERT INTO source(id, title, kind, url, author, published_at, accessed_at, reliability,"
                 " note, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (sid, title.strip(), kind, url or None, author or None, published_at or None,
+                (sid, title, kind, url or None, author or None, published_at or None,
                  accessed_at or None, reliability or None, note, ts, ts),
             )
             self._revision("source", sid, "create")
@@ -826,6 +824,8 @@ class ProjectStore:
         bad = set(changes) - _SOURCE_EDITABLE
         if bad:
             raise ValueError(f"campos não editáveis: {bad}")
+        if "title" in changes:
+            changes["title"] = require_name(changes["title"], "O título da fonte")
         changes = {k: (v if v != "" or k in {"note", "title"} else None) for k, v in changes.items()}
         sets = ", ".join(f"{k}=?" for k in changes)
         with Tx(self.conn):
@@ -837,6 +837,29 @@ class ProjectStore:
                 raise ConcurrentEdit()
             self._revision("source", sid, "update")
             self.audit("source.update", "source", sid, ", ".join(sorted(changes)))
+
+    def source_link_counts(self, sid: str) -> dict[str, int]:
+        """Quantos vínculos (evidências) a fonte tem, por tipo de alvo."""
+        rows = self._all("SELECT target_kind, count(*) AS n FROM evidence WHERE source_id=? GROUP BY target_kind",
+                         (sid,))
+        counts = {"claim": 0, "relation": 0, "entity": 0}
+        counts.update({r["target_kind"]: r["n"] for r in rows})
+        return counts
+
+    def delete_source(self, sid: str) -> dict[str, int]:
+        """Exclui a fonte e DESVINCULA o que dependia dela: as evidências que apontam para a
+        fonte são removidas; afirmações e relações continuam (as que ficarem sem fonte passam
+        a aparecer em Qualidade). Um retrato da fonte fica no histórico e a ação, na auditoria.
+        Devolve as contagens de vínculos removidos."""
+        src = self.get_source(sid)
+        counts = self.source_link_counts(sid)
+        with Tx(self.conn):
+            self._revision("source", sid, "delete")
+            self.conn.execute("DELETE FROM evidence WHERE source_id=?", (sid,))
+            self.conn.execute("DELETE FROM source WHERE id=?", (sid,))
+            self.audit("source.delete", "source", sid,
+                       f"{src['title']} (vínculos removidos: {sum(counts.values())})")
+        return counts
 
     def get_source(self, sid: str) -> dict[str, Any]:
         row = self._one("SELECT * FROM source WHERE id=?", (sid,))
