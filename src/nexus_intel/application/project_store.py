@@ -136,7 +136,7 @@ class ProjectStore:
 
     def history(self, kind: str, obj_id: str) -> list[dict[str, Any]]:
         return self._all(
-            "SELECT * FROM revision WHERE object_kind=? AND object_id=? ORDER BY changed_at DESC, id DESC",
+            "SELECT * FROM revision WHERE object_kind=? AND object_id=? ORDER BY changed_at DESC, rowid DESC",
             (kind, obj_id),
         )
 
@@ -391,9 +391,10 @@ class ProjectStore:
         ids = [r["id"] for r in self._all(sql, params)]
         for eid in ids:
             self.delete_entity_permanently(eid)
-        for r in self._all("SELECT id FROM relation WHERE record_status='trashed'"):
-            self.delete_relation_permanently(r["id"])
-        return len(ids)
+        rels = [r["id"] for r in self._all("SELECT id FROM relation WHERE record_status='trashed'")]
+        for rid in rels:
+            self.delete_relation_permanently(rid)
+        return len(ids) + len(rels)
 
     def list_entities(
         self,
@@ -767,7 +768,52 @@ class ProjectStore:
             self._revision("relation", rid, record_status)
             self.audit(f"relation.{record_status}", "relation", rid)
 
+    def get_relation(self, rid: str) -> dict[str, Any]:
+        """Relação com nomes das pontas, tipo e número de fontes (para painéis de detalhe)."""
+        row = self._one(
+            "SELECT r.*, rt.label, rt.inverse_label, rt.directed, rt.key AS type_key,"
+            " s.display_name AS source_name, t.display_name AS target_name,"
+            " (SELECT count(*) FROM evidence v WHERE v.target_kind='relation' AND v.target_id=r.id) AS ev_count"
+            " FROM relation r JOIN relation_type rt ON rt.id=r.type_id"
+            " JOIN entity s ON s.id=r.source_id JOIN entity t ON t.id=r.target_id WHERE r.id=?",
+            (rid,))
+        if not row:
+            raise NexusError("Relação não encontrada: ela pode ter sido excluída definitivamente.")
+        row["phrase"] = f"{row['source_name']} {row['label']} {row['target_name']}"
+        return row
+
+    def cut_relation(self, rid: str) -> None:
+        """Corta a relação: ela vai para a lixeira (recuperável). As entidades não mudam."""
+        rel = self.get_relation(rid)
+        if rel["record_status"] == "trashed":
+            return
+        self.set_relation_status(rid, "trashed")
+
+    def restore_relation(self, rid: str) -> None:
+        rel = self.get_relation(rid)
+        if rel["record_status"] != "trashed":
+            return
+        self.set_relation_status(rid, "active")
+
+    def list_trashed_relations(self) -> list[dict[str, Any]]:
+        rows = self._all(
+            "SELECT r.id, r.updated_at, r.epistemic_status, rt.label, s.display_name AS source_name,"
+            " t.display_name AS target_name, s.record_status AS source_status, t.record_status AS target_status"
+            " FROM relation r JOIN relation_type rt ON rt.id=r.type_id"
+            " JOIN entity s ON s.id=r.source_id JOIN entity t ON t.id=r.target_id"
+            " WHERE r.record_status='trashed' ORDER BY r.updated_at DESC")
+        for r in rows:
+            r["phrase"] = f"{r['source_name']} {r['label']} {r['target_name']}"
+        return rows
+
     def delete_relation_permanently(self, rid: str) -> None:
+        """Exclui de vez uma relação cortada, com as evidências dela (nada fica órfão).
+        As entidades das pontas continuam intactas."""
+        rel = self._one("SELECT record_status FROM relation WHERE id=?", (rid,))
+        if not rel:
+            return
+        if rel["record_status"] != "trashed":
+            raise NexusError("Corte a relação (mova para a lixeira) antes de excluí-la definitivamente.")
         with Tx(self.conn):
             self._revision("relation", rid, "purge")
             self.conn.execute("DELETE FROM evidence WHERE target_kind='relation' AND target_id=?", (rid,))
@@ -1160,7 +1206,7 @@ class ProjectStore:
 
     def last_merge_revision(self, keep_id: str) -> str | None:
         row = self._one(
-            "SELECT id FROM revision WHERE object_id=? AND change_kind='merge' ORDER BY changed_at DESC, id DESC LIMIT 1",
+            "SELECT id FROM revision WHERE object_id=? AND change_kind='merge' ORDER BY changed_at DESC, rowid DESC LIMIT 1",
             (keep_id,))
         return row["id"] if row else None
 
