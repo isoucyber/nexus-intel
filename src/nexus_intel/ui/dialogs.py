@@ -10,7 +10,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
-    QFormLayout,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
@@ -31,7 +30,7 @@ from nexus_intel.domain.model import (
     Epistemic,
 )
 from nexus_intel.ui.common import button, hbox, label, show_error
-from nexus_intel.ui.design.components import require_text
+from nexus_intel.ui.design.components import dialog_form, require_text
 from nexus_intel.ui.links import open_external_link
 
 
@@ -174,8 +173,6 @@ class SourceDialog(QDialog):
         self.store = store
         self.source = source
         self.source_id: str | None = source["id"] if source else None
-        self.setWindowTitle("Editar fonte" if source else "Nova fonte")
-        self.setMinimumWidth(520)
         s = source or {}
         self.title = QLineEdit(s.get("title", ""))
         self.kind = QComboBox()
@@ -200,7 +197,7 @@ class SourceDialog(QDialog):
 
         self.discredited = QCheckBox("Fonte desacreditada (afirmações que dependem só dela serão sinalizadas)")
         self.discredited.setChecked(bool(s.get("is_discredited")))
-        form = QFormLayout(self)
+        form = dialog_form(self, "Editar fonte" if source else "Nova fonte", 520)
         self.save_btn = button("Salvar", self.accept, "Primary")
         form.addRow("Título *", self.title)
         form.addRow("", require_text(self.title, [self.save_btn], "O título da fonte não pode ficar vazio."))
@@ -255,8 +252,6 @@ class NewEntityDialog(QDialog):
         self.store = store
         self.entity_id: str | None = None
         self.existing_id: str | None = None
-        self.setWindowTitle("Nova entidade")
-        self.setMinimumWidth(520)
         self.type = QComboBox()
         for t in store.entity_types():
             self.type.addItem(t["label"], t["key"])
@@ -280,7 +275,7 @@ class NewEntityDialog(QDialog):
         self.use_existing = button("Abrir a existente", self._use_existing)
         self.use_existing.hide()
         self.save = button("Criar", self.accept, "Primary")
-        form = QFormLayout(self)
+        form = dialog_form(self, "Nova entidade", 520)
         form.addRow("Tipo", self.type)
         form.addRow("Nome *", self.name)
         form.addRow("", require_text(self.name, [self.save]))
@@ -351,8 +346,6 @@ class ClaimDialog(QDialog):
         self.store = store
         self.entity_id = entity_id
         self.claim = claim
-        self.setWindowTitle("Editar afirmação" if claim else "Nova afirmação")
-        self.setMinimumWidth(520)
         e = store.get_entity(entity_id)
         self.fields = store.fields_for_type(e["type_id"])
         self.field = QComboBox()
@@ -390,7 +383,7 @@ class ClaimDialog(QDialog):
         self.locator.setPlaceholderText("página, minuto, seção…")
         self.source.combo.currentIndexChanged.connect(self._source_changed)
 
-        form = QFormLayout(self)
+        form = dialog_form(self, "Editar afirmação" if claim else "Nova afirmação", 540)
         form.addRow("Campo", self.field)
         form.addRow("Valor *", self.value)
         form.addRow("", self.enum)
@@ -490,8 +483,6 @@ class RelationDialog(QDialog):
         self.store = store
         self.source_entity = source_entity
         self.relation = relation
-        self.setWindowTitle("Editar relação" if relation else "Nova relação")
-        self.setMinimumWidth(520)
         src = store.get_entity(source_entity)
         self.type = QComboBox()
         for rt in store.relation_types():
@@ -517,7 +508,7 @@ class RelationDialog(QDialog):
         self.excerpt = QLineEdit()
         self.excerpt.setPlaceholderText("trecho da fonte")
 
-        form = QFormLayout(self)
+        form = dialog_form(self, "Editar relação" if relation else "Nova relação", 540)
         form.addRow("De", label(src["display_name"]))
         form.addRow("Tipo", self.type)
         if relation:
@@ -572,12 +563,10 @@ class EvidenceDialog(QDialog):
     def __init__(self, store: ProjectStore, kind: str, target_id: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.store, self.kind, self.target_id = store, kind, target_id
-        self.setWindowTitle("Adicionar fonte")
-        self.setMinimumWidth(480)
         self.source = SourcePicker(store)
         self.excerpt = QLineEdit()
         self.locator = QLineEdit()
-        form = QFormLayout(self)
+        form = dialog_form(self, "Adicionar fonte", 480)
         form.addRow("Fonte", self.source)
         form.addRow("Trecho", self.excerpt)
         form.addRow("Localizador", self.locator)

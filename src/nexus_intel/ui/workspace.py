@@ -41,6 +41,7 @@ from nexus_intel.ui.design.components import (
     Select,
     notify,
     on_theme,
+    set_tab_icon,
     text,
 )
 from nexus_intel.ui.design.table import Column, DataTable
@@ -425,9 +426,9 @@ class QualityPage(Page):
                           button("São diferentes", self._different, icon="x"),
                           button("Mesclar B em A", self._merge, icon="git-merge")))
         dl.addWidget(self.dups, 1)
-        tabs.addTab(self.conflicts, assets.icon("triangle-alert"), "Conflitos")
-        tabs.addTab(self.orphans, assets.icon("circle-dashed"), "Sem fonte")
-        tabs.addTab(dup_page, assets.icon("git-merge"), "Possíveis duplicatas")
+        set_tab_icon(tabs, tabs.addTab(self.conflicts, "Conflitos"), "triangle-alert")
+        set_tab_icon(tabs, tabs.addTab(self.orphans, "Sem fonte"), "circle-dashed")
+        set_tab_icon(tabs, tabs.addTab(dup_page, "Possíveis duplicatas"), "git-merge")
         self.layout_.addWidget(tabs, 1)
 
     def refresh(self) -> None:
@@ -497,8 +498,8 @@ class TrashPage(Page):
                                     "das pontas nunca são apagadas.")
         self.rel_stack = _stack(self.rel_table, self.rel_empty)
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.stack, assets.icon("database"), "Entidades")
-        self.tabs.addTab(self.rel_stack, assets.icon("network"), "Relações")
+        set_tab_icon(self.tabs, self.tabs.addTab(self.stack, "Entidades"), "database")
+        set_tab_icon(self.tabs, self.tabs.addTab(self.rel_stack, "Relações"), "network")
         self.layout_.addWidget(self.tabs, 1)
 
     def refresh(self) -> None:
@@ -735,15 +736,15 @@ class Workspace(QWidget):
         side.setProperty("sidebar", "true")
         side.setFixedWidth(236)
         sl = QVBoxLayout(side)
-        sl.setContentsMargins(12, 16, 12, 12)
+        sl.setContentsMargins(12, 12, 12, 10)
         sl.setSpacing(2)
         sl.addWidget(label("NEXUS INTEL", "Brand"))
-        sl.addSpacing(10)
+        sl.addSpacing(6)
         sl.addWidget(text("PROJETO", "overline"))
         pname = ElidedLabel(project_name, "h3")
         pname.setStyleSheet(f"border-left: 3px solid {color}; padding-left: 8px;")
         sl.addWidget(pname)
-        sl.addSpacing(8)
+        sl.addSpacing(4)
         self.nav_group = QButtonGroup(self)
         self.nav_buttons: dict[str, Any] = {}
         self.pending_items: dict[str, Any] = {}
@@ -752,12 +753,13 @@ class Workspace(QWidget):
         nl.setContentsMargins(0, 0, 0, 0)
         nl.setSpacing(1)
         for group, items in self.GROUPS:
-            nl.addSpacing(8)
+            nl.addSpacing(6)
             nl.addWidget(text(group.upper(), "overline"))
-            nl.addSpacing(2)
+            nl.addSpacing(1)
             for key, label_, icon, pending in items:
                 b = button(label_, lambda k=key: self.go(k), "Nav", icon=icon)
                 b.setCheckable(True)
+                b.setFocusPolicy(Qt.FocusPolicy.TabFocus)  # clique não deixa anel de foco; Tab ainda alcança
                 self.nav_group.addButton(b)
                 self.nav_buttons[key] = b
                 nl.addWidget(self._pending_item(key, b) if pending else b)
@@ -831,6 +833,8 @@ class Workspace(QWidget):
         self._current = "home"
         on_theme(self, lambda _t: self._label_section_tab())
         self.go("home" if store.count_entities() else "entities")
+        # Sem anel de foco no 1º item do menu ao abrir: o foco vai para a área de conteúdo.
+        QTimer.singleShot(0, lambda: isValid(self.tabs) and self.tabs.setFocus(Qt.FocusReason.OtherFocusReason))
 
     def _pending_item(self, key: str, b: Any) -> QWidget:
         """Item de módulo em preparação: texto em cinza + rótulo, abre a página explicativa."""
@@ -926,8 +930,7 @@ class Workspace(QWidget):
         name = page.entity.get("display_name", "Entidade")
         type_key = page.entity.get("type_key", "other")
         idx = self.tabs.addTab(page, name if len(name) < 24 else name[:22] + "…")
-        self.tabs.setTabIcon(idx, assets.icon(assets.TYPE_ICONS.get(type_key, "circle"),
-                                              tokens.current().type_color(type_key)))
+        set_tab_icon(self.tabs, idx, assets.TYPE_ICONS.get(type_key, "circle"), type_key)
         self.tabs.setTabToolTip(idx, name)
         self.tabs.setCurrentIndex(idx)
         if self.tabs.count() > 12:  # limite de abas abertas

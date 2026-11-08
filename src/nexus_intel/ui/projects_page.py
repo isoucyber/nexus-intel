@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QColorDialog,
     QComboBox,
     QDialog,
-    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -41,6 +40,7 @@ from nexus_intel.ui.design.components import (
     Input,
     ResponsiveGrid,
     Skeleton,
+    dialog_form,
     notify,
     require_text,
     text,
@@ -59,8 +59,6 @@ TEMPLATE_HINTS = {
 class NewProjectDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Novo projeto")
-        self.setMinimumWidth(480)
         self.color = tokens.ACCENT_PRESETS["Turquesa"]
         self.name = QLineEdit()
         self.template = QComboBox()
@@ -80,7 +78,7 @@ class NewProjectDialog(QDialog):
             self.legal.addItem(opt or "— escolher se houver dados de pessoas —", opt)
         self.color_btn = button("Cor", self._pick)
         self._paint()
-        form = QFormLayout(self)
+        form = dialog_form(self, "Novo projeto", 500)
         self.ok = button("Criar projeto", self.accept, "Primary")
         form.addRow("Nome *", self.name)
         form.addRow("", require_text(self.name, [self.ok], "O nome do projeto não pode ficar vazio."))

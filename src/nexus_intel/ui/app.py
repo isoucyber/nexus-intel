@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDoubleSpinBox,
-    QFormLayout,
     QMainWindow,
     QSpinBox,
     QStackedWidget,
@@ -31,6 +30,7 @@ from nexus_intel.ui.auth import ChangePasswordDialog, LoginPage, RecoveryKeyDial
 from nexus_intel.ui.common import button, confirm, guarded, hbox, label, show_error
 from nexus_intel.ui.projects_page import ProjectsPage
 from nexus_intel.ui.design import tokens
+from nexus_intel.ui.design.components import dialog_form
 from nexus_intel.ui.design.manager import apply_appearance
 from nexus_intel.ui.workspace import Workspace
 
@@ -69,8 +69,6 @@ class SettingsDialog(QDialog):
         super().__init__(win)
         self.win = win
         s = win.session
-        self.setWindowTitle("Configurações")
-        self.setMinimumWidth(520)
         current = win.appearance()
         self.theme = QComboBox()
         for k, t in tokens.THEMES.items():
@@ -84,7 +82,7 @@ class SettingsDialog(QDialog):
         self.idle.setRange(1, 240)
         self.idle.setSuffix(" min")
         self.idle.setValue(int(win.pref("idle_minutes")))
-        form = QFormLayout(self)
+        form = dialog_form(self, "Configurações", 560)
         form.addRow(label("Aparência", "H2"))
         form.addRow("Tema", self.theme)
         form.addRow("Tamanho do texto", self.scale)

@@ -155,7 +155,8 @@ class ProjectManager:
         self.current = ProjectStore(conn, info.id, self.session.username or "?")
         self.current.audit("project.open", "project", info.id, info.name)
         self.session.app_db.execute(
-            "UPDATE project_registry SET last_opened_at=? WHERE id=?", (now_iso(), info.id)
+            "UPDATE project_registry SET last_opened_at=?, entity_count=? WHERE id=?",
+            (now_iso(), self.current.count_entities(), info.id),
         )
         return self.current
 

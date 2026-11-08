@@ -21,6 +21,7 @@ from nexus_intel.application.session import Session
 from nexus_intel.domain.errors import NexusError, ThrottledError
 from nexus_intel.infrastructure.crypto.vault import check_password_strength
 from nexus_intel.ui.common import Page, button, card, hbox, label, show_error
+from nexus_intel.ui.design.components import dialog_form
 
 TERMS = (
     "O NEXUS INTEL organiza informações que você obteve de forma legítima. Ele não é "
@@ -264,13 +265,11 @@ class ChangePasswordDialog(QDialog):
         super().__init__(parent)
         self.session = session
         self.require_current = require_current
-        self.setWindowTitle("Definir nova senha" if not require_current else "Trocar senha")
-        self.setMinimumWidth(420)
         self.current = _password("senha atual")
         self.new = _password("nova senha (mín. 12)")
         self.new2 = _password("repita a nova senha")
         self.error = label("", "Danger", wrap=True)
-        form = QFormLayout(self)
+        form = dialog_form(self, "Definir nova senha" if not require_current else "Trocar senha", 440)
         if require_current:
             form.addRow("Senha atual", self.current)
         form.addRow("Nova senha", self.new)

@@ -9,6 +9,11 @@ Formato baseado em Keep a Changelog; versões seguem SemVer.
 - Grafo: linhas selecionáveis com painel de detalhes; corte remove só a linha e mantém os nós no lugar.
 - Links http/https clicáveis em fontes, atributos de link, evidências, painel do grafo e linha do tempo
   (`QDesktopServices.openUrl` com validação; só abre por clique).
+### Alterado
+- Diálogos de formulário usam o cabeçalho padrão (`dialog_form`: título, botão Fechar, espaçamentos dos tokens).
+- Ícones de abas re-tingidos na troca de tema (`set_tab_icon`).
+- Menu lateral mais compacto; botões do menu só recebem foco por Tab; foco inicial vai para o conteúdo.
+- `entity_count` do projeto atualizado também ao abrir.
 ### Corrigido
 - Histórico ordenava pelo ID aleatório dentro do mesmo segundo.
 - Grafo reagia à troca de tema depois de o projeto ser fechado.

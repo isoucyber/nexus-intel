@@ -28,6 +28,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
+    QFormLayout,
     QFrame,
     QGraphicsDropShadowEffect,
     QGraphicsOpacityEffect,
@@ -67,6 +68,25 @@ def _on_theme(widget: QObject, slot: Callable[[Tokens], Any]) -> None:
 
 
 on_theme = _on_theme
+
+
+def set_tab_icon(tabs: Any, index: int, name: str, type_key: str | None = None) -> None:
+    """Ícone de aba que acompanha a troca de tema (cor de tipo de entidade, se houver)."""
+    bar = tabs.tabBar()
+    bar.setTabData(index, f"icon:{name}|{type_key or ''}")
+
+    def paint(i: int) -> None:
+        data = bar.tabData(i)
+        if not isinstance(data, str) or not data.startswith("icon:"):
+            return
+        icon_name, _, tkey = data[5:].partition("|")
+        t = tokens.current()
+        tabs.setTabIcon(i, assets.icon(icon_name, t.type_color(tkey) if tkey else None))
+
+    paint(index)
+    if not tabs.property("nexusTabRetint"):
+        tabs.setProperty("nexusTabRetint", True)
+        _on_theme(tabs, lambda _t: [paint(i) for i in range(tabs.count())])
 
 
 def _safe_disconnect(slot: Callable[..., Any]) -> None:
@@ -879,6 +899,27 @@ class Modal(QDialog):
         if variant == "primary":
             btn.setDefault(True)
         return btn
+
+
+def dialog_form(dialog: QDialog, title: str, width: int = 520) -> QFormLayout:
+    """Dá a um diálogo de formulário o padrão visual do Modal (título, botão de fechar,
+    espaçamentos) e devolve o QFormLayout do corpo. Mantém a classe QDialog original."""
+    t = tokens.current()
+    dialog.setWindowTitle(title)
+    dialog.setMinimumWidth(width)
+    outer = QVBoxLayout(dialog)
+    outer.setContentsMargins(t.space("xl"), t.space("lg"), t.space("xl"), t.space("lg"))
+    outer.setSpacing(t.space("lg"))
+    head = QHBoxLayout()
+    head.addWidget(ElidedLabel(title, "h2"), 1)
+    head.addWidget(IconButton("x", "Fechar", dialog.reject))
+    outer.addLayout(head)
+    form = QFormLayout()
+    form.setSpacing(t.space("md"))
+    form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+    form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+    outer.addLayout(form, 1)
+    return form
 
 
 class Drawer(QFrame):
