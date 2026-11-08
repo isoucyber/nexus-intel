@@ -2,11 +2,6 @@
 
 Formato baseado em Keep a Changelog; versões seguem SemVer.
 
-## [0.3.4] — 2026-11-07
-Mesmo conteúdo planejado para a 0.3.3 (a Release 0.3.3 foi publicada com o código anterior).
-### Corrigido
-- Grafo reagia à troca de tema depois de o projeto ser fechado.
-
 ## [0.3.3] — 2026-11-07
 ### Adicionado
 - Cortar relação na ficha da entidade (botão e menu) e no grafo (menu da linha), com confirmação; entidades preservadas.
@@ -16,6 +11,7 @@ Mesmo conteúdo planejado para a 0.3.3 (a Release 0.3.3 foi publicada com o cód
   (`QDesktopServices.openUrl` com validação; só abre por clique).
 ### Corrigido
 - Histórico ordenava pelo ID aleatório dentro do mesmo segundo.
+- Grafo reagia à troca de tema depois de o projeto ser fechado.
 
 ## [0.3.2] — 2026-11-07
 ### Adicionado
