@@ -1,4 +1,4 @@
-## NEXUS INTEL 0.3.3 — cortar relações e links clicáveis
+## NEXUS INTEL 0.3.4 — cortar relações e links clicáveis
 
 **Baixe** `NexusIntel-Setup-*.exe` abaixo e execute. Se o Windows SmartScreen avisar, clique em **Mais informações → Executar assim mesmo**. Seus usuários e projetos continuam funcionando.
 
@@ -13,3 +13,6 @@
 
 ### Correções
 - O histórico de uma entidade às vezes mostrava duas alterações do mesmo segundo fora de ordem
+- Trocar o tema depois de fechar um projeto podia mostrar uma mensagem de erro inesperado
+
+> A Release 0.3.3 foi publicada antes de o código ficar pronto; esta 0.3.4 é a versão com todas as novidades acima.
