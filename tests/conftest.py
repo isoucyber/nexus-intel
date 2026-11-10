@@ -37,7 +37,7 @@ def session(paths):
     from nexus_intel.application.session import Session
 
     s = Session(paths, kdf_params=FAST_KDF)
-    s.recovery_key = s.setup("arthur", PASSWORD, encrypt=ENCRYPT)
+    s.recovery_key = s.setup("investigador", PASSWORD, encrypt=ENCRYPT)
     yield s
     s.lock()
 

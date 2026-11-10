@@ -11,13 +11,14 @@ from nexus_intel.application.project_store import ProjectStore
 from nexus_intel.application.session import Session, now_iso
 from nexus_intel.domain.catalog import TEMPLATES
 from nexus_intel.domain.errors import NexusError, ProjectLocked, ProjectNotFound
-from nexus_intel.domain.ids import new_ulid
+from nexus_intel.domain.ids import is_ulid, new_ulid
 from nexus_intel.domain.model import require_name
 from nexus_intel.infrastructure.crypto.keys import SecretKey, hkdf, unwrap, wrap
 from nexus_intel.infrastructure.crypto.vault import CRYPTO_FULL
 from nexus_intel.infrastructure.db.connection import open_database
 from nexus_intel.infrastructure.db.migrate import migrate
 from nexus_intel.infrastructure.fsutil import InstanceLock
+from nexus_intel.infrastructure.media.blobs import BlobStore
 
 
 @dataclass
@@ -34,11 +35,26 @@ class ProjectInfo:
     entity_count: int
 
 
-def _info(row: dict[str, Any]) -> ProjectInfo:
+def project_folder(projects_root: Path, project_id: str) -> Path:
+    """Pasta do projeto SEMPRE dentro da pasta de projetos do perfil ativo.
+
+    O caminho gravado no registro não é usado para abrir nada: o ID é validado
+    (ULID) e o caminho é recalculado, então um registro adulterado não aponta
+    para a pasta de outro perfil nem para fora dela.
+    """
+    if not is_ulid(project_id):
+        raise ProjectNotFound()
+    folder = (projects_root / project_id).resolve()
+    if folder.parent != projects_root.resolve():
+        raise ProjectNotFound()
+    return folder
+
+
+def _info(row: dict[str, Any], projects_root: Path) -> ProjectInfo:
     return ProjectInfo(
         id=row["id"],
         name=row["name"],
-        path=Path(row["path"]),
+        path=project_folder(projects_root, row["id"]) / "project.nxdb",
         color=row["color"],
         icon=row["icon"],
         template=row["template"],
@@ -61,7 +77,8 @@ class ProjectManager:
         rows = self.session.app_db.execute(
             "SELECT * FROM project_registry ORDER BY coalesce(last_opened_at, created_at) DESC"
         ).fetchall()
-        return [_info(r) for r in rows]
+        root = self.session.paths.projects
+        return [_info(r, root) for r in rows if is_ulid(r["id"])]
 
     def get(self, project_id: str) -> ProjectInfo:
         row = self.session.app_db.execute(
@@ -69,7 +86,7 @@ class ProjectManager:
         ).fetchone()
         if not row:
             raise ProjectNotFound()
-        return _info(row)
+        return _info(row, self.session.paths.projects)
 
     # --- criação ---------------------------------------------------------
     def create(
@@ -119,7 +136,12 @@ class ProjectManager:
         return self.get(pid)
 
     # --- abertura --------------------------------------------------------
-    def _project_db_key(self, info: ProjectInfo) -> SecretKey | None:
+    def _project_key(self, info: ProjectInfo) -> SecretKey | None:
+        """Desembrulha a chave do projeto com a chave mestra do PERFIL ativo.
+
+        A AAD amarra a chave ao ID do projeto; a chave mestra de outro perfil
+        falha na verificação GCM, então um perfil não abre projeto de outro.
+        """
         if not info.encrypted:
             return None
         row = self.session.app_db.execute(
@@ -127,11 +149,25 @@ class ProjectManager:
         ).fetchone()
         nonce, ct = row["wrapped_project_key"].split(":", 1)
         raw = unwrap(self.session.master, {"nonce": nonce, "ct": ct}, f"nexus-intel/project/{info.id}".encode())
-        project_key = SecretKey(raw)
+        return SecretKey(raw)
+
+    def _project_db_key(self, info: ProjectInfo) -> SecretKey | None:
+        project_key = self._project_key(info)
+        if project_key is None:
+            return None
         try:
             return hkdf(project_key, "nexus-intel/project-db/v1")
         finally:
             project_key.wipe()
+
+    def _blob_store(self, info: ProjectInfo) -> BlobStore:
+        project_key = self._project_key(info)
+        try:
+            key = hkdf(project_key, "nexus-intel/project-blobs/v1") if project_key else None
+        finally:
+            if project_key:
+                project_key.wipe()
+        return BlobStore(info.path.parent / "blobs", key)
 
     def open(self, project_id: str) -> ProjectStore:
         info = self.get(project_id)
@@ -152,7 +188,7 @@ class ProjectManager:
             if key:
                 key.wipe()
         self._lock = lock
-        self.current = ProjectStore(conn, info.id, self.session.username or "?")
+        self.current = ProjectStore(conn, info.id, self.session.username or "?", self._blob_store(info))
         self.current.audit("project.open", "project", info.id, info.name)
         self.session.app_db.execute(
             "UPDATE project_registry SET last_opened_at=?, entity_count=? WHERE id=?",

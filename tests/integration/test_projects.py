@@ -14,8 +14,8 @@ from tests.conftest import FAST_KDF, PASSWORD, requires_sqlcipher
 def test_example_project_scenario(manager):
     info = manager.create("Exemplo", template="example")
     s = manager.open(info.id)
-    joao = s.search("joao")[0]
-    assert "João" in joao["display_name"]
+    joao = s.search("pessoa exemplo")[0]
+    assert "Pessoa Exemplo" in joao["display_name"]
     rels = s.relations_for(joao["id"])
     assert {r["phrase"] for r in rels} == {"possui", "trabalha em"}
     # Veneza alcançável a 2 saltos (João → veículo → Veneza), sem relação gravada direta.
@@ -54,19 +54,19 @@ def test_lock_closes_everything(session, manager):
     assert manager.current is None
     with pytest.raises(SessionLocked):
         _ = session.master
-    session.login("arthur", PASSWORD)
+    session.login("investigador", PASSWORD)
     assert [p.name for p in manager.list()] == ["X"]
 
 
 def test_recovery_login_requires_new_password(paths):
     s = Session(paths, kdf_params=FAST_KDF)
-    rk = s.setup("arthur", PASSWORD, encrypt=Session.encryption_supported())
+    rk = s.setup("investigador", PASSWORD, encrypt=Session.encryption_supported())
     s.lock()
     s.login_with_recovery(rk)
     assert s.must_change_password
     s.set_new_password("nova-senha-segura-2026")
     s.lock()
-    s.login("arthur", "nova-senha-segura-2026")
+    s.login("investigador", "nova-senha-segura-2026")
     s.lock()
 
 

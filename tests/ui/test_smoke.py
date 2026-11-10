@@ -31,7 +31,7 @@ def test_full_flow(win, qtbot):
 
     sp = win.setup_page
     assert win.stack.currentWidget() is sp
-    sp.user.setText("arthur")
+    sp.user.setText("investigador")
     sp.pw.setText(PASSWORD)
     sp.pw2.setText(PASSWORD)
     sp.terms.setChecked(True)

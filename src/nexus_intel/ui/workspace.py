@@ -49,6 +49,7 @@ from nexus_intel.ui.dialogs import NewEntityDialog, SourceDialog, delete_source_
 from nexus_intel.ui.entity_page import EntityPage
 from nexus_intel.ui.graph_view import GraphPage
 from nexus_intel.ui.links import open_external_link
+from nexus_intel.ui.notes_page import NotesPage
 from nexus_intel.ui.module_pages import SPECS, BackupPage, ImportExportPage, make_pending
 from nexus_intel.ui.timeline_page import TimelinePage
 
@@ -609,7 +610,7 @@ class SearchBox(Input):
     created = Signal()
 
     def __init__(self, store: ProjectStore, parent: QWidget | None = None) -> None:
-        super().__init__("Buscar ou criar…   ex.: Maria Souza · pessoa", icon="search", parent=parent)
+        super().__init__("Buscar ou criar…   ex.: nome · pessoa", icon="search", parent=parent)
         self.store = store
         self.setProperty("search", "true")
         self.setMinimumWidth(460)
@@ -702,6 +703,7 @@ class Workspace(QWidget):
             ("graph", "Grafo", "network", False),
             ("sources", "Fontes", "library", False),
             ("timeline", "Linha do tempo", "clock", False),
+            ("notes", "Notas", "pencil", False),
             ("attachments", "Anexos cifrados", "file-text", True),
             ("map", "Mapa offline", "map-pin", True),
         )),
@@ -806,6 +808,7 @@ class Workspace(QWidget):
             "trash": TrashPage(store),
             "audit": AuditPage(store),
             "timeline": TimelinePage(store),
+            "notes": NotesPage(store),
             "io": ImportExportPage(lambda: self.pages["graph"].export_png()),
             "backup": BackupPage(project_path),
             **{k: make_pending(k) for k in ("attachments", "map", "ai", "semantic", "suggestions")},
@@ -863,11 +866,19 @@ class Workspace(QWidget):
         Sem isso, caixas de seleção destruídas avisam “mudei” e disparam recargas
         sobre widgets que já não existem.
         """
+        try:  # grava a nota em edição antes de fechar o projeto
+            self.pages["notes"].shutdown()
+        except Exception:  # noqa: BLE001, S110 - fechar sempre completa
+            pass
         for obj in [self, *self.findChildren(QObject)]:
             obj.blockSignals(True)
             if isinstance(obj, QTimer):
                 obj.stop()
         self.search.popup.hide()
+
+    def _new_note_for(self, eid: str) -> None:
+        self.go("notes")
+        self.pages["notes"].new_note(eid)
 
     def _go_to(self, target: str) -> None:
         if target == "entities:new":
@@ -927,6 +938,7 @@ class Workspace(QWidget):
         page.open_entity.connect(self.open_entity)
         page.changed.connect(self._data_changed)
         page.show_in_graph.connect(self._show_in_graph)
+        page.new_note.connect(self._new_note_for)
         name = page.entity.get("display_name", "Entidade")
         type_key = page.entity.get("type_key", "other")
         idx = self.tabs.addTab(page, name if len(name) < 24 else name[:22] + "…")

@@ -52,7 +52,7 @@ TEMPLATE_HINTS = {
     "research": "Tipos padrão; pensado para autores, instituições e documentos.",
     "it_assets": "Tipos padrão; pensado para domínios, IPs e sistemas.",
     "genealogy": "Tipos padrão; pensado para pessoas, lugares e datas imprecisas.",
-    "example": "Dados fictícios para aprender: João → veículo → Veneza, com fontes e um conflito.",
+    "example": "Dados fictícios para aprender: pessoa → veículo → cidade, com fontes e um conflito.",
 }
 
 

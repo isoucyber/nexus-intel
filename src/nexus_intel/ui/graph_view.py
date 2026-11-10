@@ -242,6 +242,18 @@ class GraphView(QGraphicsView):
                          else QGraphicsView.DragMode.ScrollHandDrag)
         super().mousePressEvent(event)
 
+    def keyPressEvent(self, event: Any) -> None:  # noqa: N802
+        # Só chega aqui com o foco no grafo: digitar em campos de texto nunca dispara isto.
+        if event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete) and not event.modifiers() & (
+                Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier):
+            selected = self.scene().selectedItems()
+            edges = [i for i in selected if isinstance(i, EdgeItem)]
+            if len(selected) == 1 and edges:
+                self.page.quick_cut_edge(edges[0])
+            event.accept()  # sem relação selecionada: não faz nada
+            return
+        super().keyPressEvent(event)
+
     def edge_menu(self, edge: EdgeItem, screen_pos: Any) -> None:
         d = edge.data_
         m = QMenu(self)
@@ -323,7 +335,8 @@ class GraphPage(Page):
         self.edge_text.setOpenExternalLinks(False)
         self.edge_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         self.edge_text.linkActivated.connect(lambda url: open_external_link(url, self))
-        self.edge_cut = Button("Cortar relação", "danger", "x", size="sm", on_click=self._cut_selected_edge)
+        self.edge_cut = Button("Cortar relação", "danger", "x", size="sm", on_click=self._cut_selected_edge,
+                               tooltip="Cortar relação (ou tecla Backspace com a linha selecionada)")
         row = QHBoxLayout()
         row.addWidget(self.edge_text, 1)
         row.addWidget(self.edge_cut, 0, Qt.AlignmentFlag.AlignTop)
@@ -396,6 +409,33 @@ class GraphPage(Page):
         self._clear_selection_info()
         self.changed.emit()
         notify(self, "Relação cortada e enviada para a Lixeira. As entidades continuam no grafo.", "success")
+
+    def quick_cut_edge(self, edge: EdgeItem) -> None:
+        """Backspace: corta só a relação selecionada, sem perguntar, com “Desfazer” no aviso."""
+        rid = edge.data_["id"]
+        try:
+            self.store.cut_relation(rid)
+        except NexusError as exc:
+            notify(self, exc.user_message, "info")
+            return
+        phrase = f"{edge.a.data_['display_name']} → {edge.data_.get('label', 'relação')} → {edge.b.data_['display_name']}"
+        self.remove_edge(edge)
+        self._clear_selection_info()
+        self.changed.emit()
+        notify(self, f"Relação cortada ({phrase}). As entidades continuam no grafo.", "success",
+               action=("Desfazer", lambda: self.undo_cut(rid)))
+
+    def undo_cut(self, rid: str) -> None:
+        if not isValid(self):
+            return
+        try:
+            self.store.restore_relation(rid)
+        except NexusError as exc:
+            notify(self, exc.user_message, "info")
+            return
+        self.reload(keep_positions=True)
+        self.changed.emit()
+        notify(self, "Relação restaurada.", "success")
 
     def remove_edge(self, edge: EdgeItem) -> None:
         for node in (edge.a, edge.b):

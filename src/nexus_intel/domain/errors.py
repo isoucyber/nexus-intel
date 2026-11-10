@@ -73,3 +73,31 @@ class SchemaTooNew(NexusError):
         "Este projeto foi criado por uma versão mais nova do NEXUS INTEL. "
         "Atualize o aplicativo para editá-lo."
     )
+
+
+class InvalidImage(NexusError):
+    user_message = "O arquivo não é uma imagem válida em um formato aceito (JPG, PNG, WEBP, GIF, BMP ou TIFF)."
+
+
+class AttachmentTooLarge(NexusError):
+    user_message = "A imagem é grande demais (limite de 50 MB por arquivo)."
+
+
+class BlobCorrupted(NexusError):
+    user_message = "Um arquivo anexado está corrompido ou foi alterado fora do NEXUS INTEL."
+
+
+class PackageError(NexusError):
+    user_message = "O arquivo .nexus é inválido ou está corrompido."
+
+
+class PackageAuthError(PackageError):
+    user_message = "Senha incorreta ou arquivo .nexus alterado. Nada foi importado."
+
+
+class PackageIncompatible(PackageError):
+    user_message = "Este arquivo .nexus foi criado por uma versão mais nova do NEXUS INTEL. Atualize o aplicativo."
+
+
+class ProfileError(NexusError):
+    user_message = "Não foi possível concluir a operação no perfil."

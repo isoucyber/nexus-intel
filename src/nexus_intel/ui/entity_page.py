@@ -42,6 +42,7 @@ from nexus_intel.ui.common import (
 )
 from nexus_intel.ui.dialogs import ClaimDialog, EvidenceDialog, RelationDialog, cut_relation_flow
 from nexus_intel.ui.links import link_html, open_external_link, safe_http_url
+from nexus_intel.ui.photos import PhotoGallery
 from nexus_intel.ui.design import assets, tokens
 from nexus_intel.ui.design.components import (
     require_text,
@@ -80,6 +81,7 @@ def _item(text: str, data: Any = None, color: str | None = None) -> QTableWidget
 class EntityPage(Page):
     open_entity = Signal(str)
     show_in_graph = Signal(str)
+    new_note = Signal(str)
     changed = Signal()
 
     def __init__(self, store: ProjectStore, entity_id: str) -> None:
@@ -98,6 +100,8 @@ class EntityPage(Page):
         head.addWidget(self.avatar)
         head.addWidget(self.title, 1)
         head.addWidget(self.fav)
+        head.addWidget(button("", lambda: self.new_note.emit(self.entity_id), "Ghost",
+                              tip="Nova nota sobre esta entidade", icon="pencil"))
         head.addSpacing(12)
         head.addWidget(button("Ver no grafo", lambda: self.show_in_graph.emit(self.entity_id), icon="network"))
         head.addWidget(button("Arquivar", self._archive, icon="archive"))
@@ -109,6 +113,9 @@ class EntityPage(Page):
         self.tabs = QTabWidget()
         self.layout_.addWidget(self.tabs, 1)
         self.tabs.addTab(self._build_overview(), "Resumo")
+        self.photos = PhotoGallery(store, entity_id)
+        self.photos.changed.connect(self._photos_changed)
+        self.tabs.addTab(self.photos, "Fotografias")
         self.tabs.addTab(self._build_claims(), "Atributos")
         self.tabs.addTab(self._build_relations(), "Relações")
         self.tabs.addTab(self._build_connections(), "Conexões")
@@ -525,6 +532,14 @@ class EntityPage(Page):
             self.refresh()
             self.changed.emit()
 
+    def _label_photos_tab(self) -> None:
+        n = len(self.photos.rows)
+        self.tabs.setTabText(self.tabs.indexOf(self.photos), f"Fotografias ({n})" if n else "Fotografias")
+
+    def _photos_changed(self) -> None:
+        self._label_photos_tab()
+        self.changed.emit()
+
     def refresh(self) -> None:
         e = guarded(self, lambda: self.store.get_entity(self.entity_id))
         if e is None:
@@ -536,6 +551,7 @@ class EntityPage(Page):
         status = {"active": "", "archived": " · ARQUIVADA", "trashed": " · NA LIXEIRA"}[e["record_status"]]
         self.subtitle.setText(f"{e['type_label']} · importância {e['importance']}{status} · "
                               f"criada {fmt_ts(e['created_at'])} · atualizada {fmt_ts(e['updated_at'])}")
+        self._label_photos_tab()
         self.fav.setToolTip("Remover dos favoritos" if e["is_favorite"] else "Favoritar")
         self.fav.setText("Favorito" if e["is_favorite"] else "")
         lay = self.chips.layout()

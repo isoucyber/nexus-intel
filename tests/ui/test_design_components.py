@@ -143,7 +143,7 @@ def test_critical_flows_create_search_trash_lock(qtbot, paths, monkeypatch):
     qtbot.addWidget(win)
     win.show()
     sp = win.setup_page
-    sp.user.setText("arthur")
+    sp.user.setText("investigador")
     sp.pw.setText(PASSWORD)
     sp.pw2.setText(PASSWORD)
     sp.terms.setChecked(True)

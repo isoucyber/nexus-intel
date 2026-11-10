@@ -33,6 +33,8 @@ from nexus_intel.domain.rules import (
     score_duplicate,
 )
 from nexus_intel.infrastructure.db.connection import Tx
+from nexus_intel.infrastructure.media.blobs import BlobStore
+from nexus_intel.infrastructure.media.images import inspect_image
 
 GENESIS_HASH = "0" * 64
 _ENTITY_EDITABLE = {
@@ -74,16 +76,19 @@ class FieldGroup:
 
 
 class ProjectStore:
-    def __init__(self, conn: Any, project_id: str, actor: str) -> None:
+    def __init__(self, conn: Any, project_id: str, actor: str, blobs: BlobStore | None = None) -> None:
         self.conn = conn
         self.project_id = project_id
         self.actor = actor
+        self.blobs = blobs
 
     def close(self) -> None:
         try:
             self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         finally:
             self.conn.close()
+            if self.blobs is not None:
+                self.blobs.close()
 
     # ================================================================ util
     def _one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
@@ -173,9 +178,9 @@ class ProjectStore:
             self._seed_example()
 
     def _seed_example(self) -> None:
-        """Exemplo guiado da especificação: João → veículo → Veneza, com fontes fictícias."""
-        joao = self.create_entity("person", "João da Silva (fictício)", summary="Pessoa de exemplo.",
-                                  aliases=["J. Silva"])
+        """Exemplo guiado: pessoa → veículo → cidade, com fontes fictícias e sem nomes reais."""
+        joao = self.create_entity("person", "Pessoa Exemplo (fictícia)", summary="Pessoa de exemplo.",
+                                  aliases=["P. Exemplo"])
         carro = self.create_entity("vehicle", "Fiat Uno placa XYZ-0000 (fictício)")
         veneza = self.create_entity("location", "Veneza", summary="Cidade no nordeste da Itália.")
         empresa = self.create_entity("company", "Acme Transportes Ltda. (fictícia)")
@@ -184,7 +189,7 @@ class ProjectStore:
         news = self.create_source("Reportagem fictícia sobre a Acme", kind="news",
                                   url="https://exemplo.invalid/reportagem", reliability="C")
         self.create_relation("owns", joao, carro, status="verified", evidence_source=doc,
-                             excerpt="Proprietário: João da Silva", valid_from="2024-01-01")
+                             excerpt="Proprietário: Pessoa Exemplo", valid_from="2024-01-01")
         self.create_relation("located_in", carro, veneza, status="reported", evidence_source=news,
                              excerpt="O veículo foi visto em Veneza")
         self.create_relation("works_at", joao, empresa, status="unverified")
@@ -381,6 +386,7 @@ class ProjectStore:
             self.conn.execute("DELETE FROM entity_fts WHERE entity_id=?", (eid,))
             self.conn.execute("DELETE FROM entity WHERE id=?", (eid,))
             self.audit("entity.purge", "entity", eid, row["display_name"])
+        self._gc_attachments()
 
     def empty_trash(self, older_than_days: int | None = None) -> int:
         sql, params = "SELECT id FROM entity WHERE record_status='trashed'", ()
@@ -1354,3 +1360,159 @@ class ProjectStore:
                 out.append({"entity_id": r["subject_id"], "display_name": e["display_name"] if e else "?",
                             "field": r["label"]})
         return out
+
+    # ============================================================== notas
+    def list_notes(self, query: str = "", entity_id: str | None = None,
+                   order: str = "updated") -> list[dict[str, Any]]:
+        where, params = ["1=1"], []
+        if query.strip():
+            like = f"%{query.strip().lower()}%"
+            where.append("(lower(n.title) LIKE ? OR lower(n.body) LIKE ?)")
+            params += [like, like]
+        if entity_id:
+            where.append("n.entity_id=?")
+            params.append(entity_id)
+        order_sql = {"updated": "n.updated_at DESC, n.rowid DESC", "created": "n.created_at DESC, n.rowid DESC",
+                     "title": "lower(n.title), n.updated_at DESC"}.get(order, "n.updated_at DESC")
+        return self._all(
+            "SELECT n.*, e.display_name AS entity_name, substr(n.body, 1, 200) AS preview FROM note n"
+            f" LEFT JOIN entity e ON e.id=n.entity_id WHERE {' AND '.join(where)} ORDER BY {order_sql}",  # noqa: S608
+            tuple(params))
+
+    def get_note(self, nid: str) -> dict[str, Any]:
+        row = self._one("SELECT n.*, e.display_name AS entity_name FROM note n"
+                        " LEFT JOIN entity e ON e.id=n.entity_id WHERE n.id=?", (nid,))
+        if not row:
+            raise NexusError("Nota não encontrada.")
+        return row
+
+    def _check_note_entity(self, entity_id: str | None) -> str | None:
+        if not entity_id:
+            return None
+        if not self._one("SELECT id FROM entity WHERE id=?", (entity_id,)):
+            raise NexusError("A entidade vinculada não existe mais.")
+        return entity_id
+
+    @staticmethod
+    def _note_ts() -> str:
+        # Microssegundos: o salvamento automático acontece várias vezes no mesmo segundo.
+        return datetime.now(UTC).isoformat(timespec="microseconds")
+
+    def create_note(self, title: str = "", body: str = "", entity_id: str | None = None) -> str:
+        nid, ts = new_ulid(), self._note_ts()
+        with Tx(self.conn):
+            self.conn.execute(
+                "INSERT INTO note(id, title, body, entity_id, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+                (nid, title.strip(), body, self._check_note_entity(entity_id), ts, ts))
+            self.audit("note.create", "note", nid, title.strip()[:80])
+        return nid
+
+    def update_note(self, nid: str, title: str, body: str, entity_id: str | None = None) -> None:
+        """Salvamento automático: grava título, texto e vínculo; sem entrada de auditoria a cada tecla."""
+        self.get_note(nid)
+        self.conn.execute("UPDATE note SET title=?, body=?, entity_id=?, updated_at=? WHERE id=?",
+                          (title.strip(), body, self._check_note_entity(entity_id), self._note_ts(), nid))
+
+    def delete_note(self, nid: str) -> None:
+        note = self.get_note(nid)
+        with Tx(self.conn):
+            self.conn.execute("DELETE FROM note WHERE id=?", (nid,))
+            self.audit("note.delete", "note", nid, note["title"][:80])
+
+    # ========================================================= fotografias
+    def _require_blobs(self) -> BlobStore:
+        if self.blobs is None:
+            raise NexusError("O armazenamento de arquivos deste projeto não está disponível.")
+        return self.blobs
+
+    def _store_image(self, data: bytes, original_name: str) -> str:
+        """Valida pelo conteúdo, guarda o arquivo (deduplicado) e devolve o id do attachment."""
+        info = inspect_image(data)
+        sha = self._require_blobs().put(data)
+        row = self._one("SELECT id FROM attachment WHERE sha256=?", (sha,))
+        if row:
+            return str(row["id"])
+        aid = new_ulid()
+        name = re.sub(r"[\\/\x00-\x1f]", "_", original_name)[-200:]
+        self.conn.execute(
+            "INSERT INTO attachment(id, sha256, kind, mime, size, width, height, original_name, has_exif,"
+            " has_gps, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (aid, sha, "image", info.mime, len(data), info.width, info.height, name,
+             int(info.has_exif), int(info.has_gps), now_iso()))
+        return aid
+
+    def add_photo(self, entity_id: str, data: bytes, original_name: str = "") -> str:
+        ent = self.get_entity(entity_id)
+        if self._one("SELECT p.id FROM entity_photo p JOIN attachment a ON a.id=p.attachment_id"
+                     " WHERE p.entity_id=? AND a.sha256=?", (entity_id, hashlib.sha256(data).hexdigest())):
+            raise NexusError("Esta imagem já está nas fotografias desta entidade.")
+        with Tx(self.conn):
+            aid = self._store_image(data, original_name)
+            if self._one("SELECT id FROM entity_photo WHERE entity_id=? AND attachment_id=?", (entity_id, aid)):
+                raise NexusError("Esta imagem já está nas fotografias desta entidade.")
+            pos = self._one("SELECT coalesce(max(position), -1) + 1 AS p FROM entity_photo WHERE entity_id=?",
+                            (entity_id,))
+            pid = new_ulid()
+            self.conn.execute(
+                "INSERT INTO entity_photo(id, entity_id, attachment_id, position, created_at) VALUES (?,?,?,?,?)",
+                (pid, entity_id, aid, pos["p"] if pos else 0, now_iso()))
+            self.audit("photo.add", "entity", entity_id, f"{ent['display_name']}: {original_name}"[:200])
+        return pid
+
+    def list_photos(self, entity_id: str) -> list[dict[str, Any]]:
+        return self._all(
+            "SELECT p.id, p.entity_id, p.position, p.caption, p.created_at, a.id AS attachment_id, a.sha256,"
+            " a.mime, a.size, a.width, a.height, a.original_name, a.has_exif, a.has_gps, e.display_name AS entity_name"
+            " FROM entity_photo p JOIN attachment a ON a.id=p.attachment_id JOIN entity e ON e.id=p.entity_id"
+            " WHERE p.entity_id=? ORDER BY p.position, p.created_at", (entity_id,))
+
+    def get_photo(self, photo_id: str) -> dict[str, Any]:
+        row = self._one(
+            "SELECT p.*, a.sha256, a.mime, a.original_name FROM entity_photo p"
+            " JOIN attachment a ON a.id=p.attachment_id WHERE p.id=?", (photo_id,))
+        if not row:
+            raise NexusError("Fotografia não encontrada.")
+        return row
+
+    def photo_count(self, entity_id: str) -> int:
+        row = self._one("SELECT count(*) AS n FROM entity_photo WHERE entity_id=?", (entity_id,))
+        return int(row["n"]) if row else 0
+
+    def photo_bytes(self, photo_id: str) -> bytes:
+        return self._require_blobs().get(self.get_photo(photo_id)["sha256"])
+
+    def remove_photo(self, photo_id: str) -> None:
+        photo = self.get_photo(photo_id)
+        with Tx(self.conn):
+            self.conn.execute("DELETE FROM entity_photo WHERE id=?", (photo_id,))
+            self.audit("photo.remove", "entity", photo["entity_id"], photo["original_name"][:200])
+        self._gc_attachments()
+
+    def replace_photo(self, photo_id: str, data: bytes, original_name: str = "") -> None:
+        photo = self.get_photo(photo_id)
+        with Tx(self.conn):
+            aid = self._store_image(data, original_name)
+            if aid == photo["attachment_id"]:
+                return
+            if self._one("SELECT id FROM entity_photo WHERE entity_id=? AND attachment_id=?",
+                         (photo["entity_id"], aid)):
+                raise NexusError("Esta imagem já está nas fotografias desta entidade.")
+            self.conn.execute("UPDATE entity_photo SET attachment_id=? WHERE id=?", (aid, photo_id))
+            self.audit("photo.replace", "entity", photo["entity_id"], original_name[:200])
+        self._gc_attachments()
+
+    def _gc_attachments(self) -> int:
+        """Apaga registros e arquivos de imagens que nenhuma entidade usa mais."""
+        orphans = self._all("SELECT id, sha256 FROM attachment WHERE id NOT IN"
+                            " (SELECT attachment_id FROM entity_photo)")
+        for row in orphans:
+            self.conn.execute("DELETE FROM attachment WHERE id=?", (row["id"],))
+            if self.blobs is not None:
+                self.blobs.delete(row["sha256"])
+        if self.blobs is not None:  # arquivos sem registro (ex.: operação interrompida)
+            known = {r["sha256"] for r in self._all("SELECT sha256 FROM attachment")}
+            for sha in self.blobs.list_shas():
+                if sha not in known:
+                    self.blobs.delete(sha)
+        return len(orphans)
+

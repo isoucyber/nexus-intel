@@ -86,9 +86,9 @@ class SetupPage(Page):
         super().__init__()
         self.session = session
         self.user = QLineEdit()
-        self.user.setPlaceholderText("ex.: arthur")
-        self.pw = _password("mínimo de 12 caracteres")
-        self.pw2 = _password("repita a senha")
+        self.user.setPlaceholderText("Nome de usuário")
+        self.pw = _password("Crie uma senha (mín. 12 caracteres)")
+        self.pw2 = _password("Confirme sua senha")
         self.encrypt = QCheckBox("Cifrar todos os dados (recomendado)")
         self.encrypt.setChecked(Session.encryption_supported())
         self.encrypt.setEnabled(Session.encryption_supported())

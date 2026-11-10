@@ -17,6 +17,7 @@ dependencies = [
     "sqlcipher3-wheels>=0.5",    # banco cifrado (ver ADR-0003)
     "PySide6-Essentials>=6.8",   # Qt Widgets; QtWebEngine entra na F2
     "numpy>=1.26",               # layout do grafo
+    "Pillow>=10.4",              # fotografias: validação por conteúdo, WEBP/TIFF, miniaturas
 ]
 
 [project.optional-dependencies]
