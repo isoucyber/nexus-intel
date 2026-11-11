@@ -6,6 +6,7 @@ atualizar quando o usuário troca tema, destaque, escala ou densidade.
 
 from __future__ import annotations
 
+import html
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -209,6 +210,7 @@ def require_text(edit: QLineEdit, buttons: Sequence[QPushButton], message: str =
     espaços nas pontas) estiver vazio. A mesma regra é aplicada de novo no backend.
     Devolve o rótulo de erro, para ser colocado logo abaixo do campo."""
     error = QLabel(message)
+    error.setTextFormat(Qt.TextFormat.PlainText)
     error.setProperty("role", "danger")
     error.setProperty("fieldError", "true")
     error.hide()
@@ -260,6 +262,7 @@ class ElidedLabel(QLabel):
 
     def __init__(self, text: str = "", role: str | None = None, parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
+        self.setTextFormat(Qt.TextFormat.PlainText)
         if role:
             self.setProperty("role", role)
         self._full = text
@@ -280,7 +283,7 @@ class ElidedLabel(QLabel):
 
     def _update_tip(self) -> None:
         elided = self.fontMetrics().horizontalAdvance(self._full) > self.contentsRect().width()
-        self.setToolTip(self._full if elided else "")
+        self.setToolTip(safe_tooltip(self._full) if elided else "")
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802
         return QSize(24, super().minimumSizeHint().height())
@@ -294,8 +297,21 @@ class ElidedLabel(QLabel):
         p.drawText(rect, int(self.alignment() | Qt.AlignmentFlag.AlignVCenter), text)
 
 
+def safe_tooltip(content: str) -> str:
+    """Dica de ferramenta que nunca é interpretada como HTML.
+
+    O Qt trata como rich text qualquer dica que “pareça” HTML. Nomes vindos de um
+    .nexus importado (dado não confiável) poderiam então desenhar imagens, links
+    ou falsificar textos. Aqui o texto é escapado e envolvido explicitamente.
+    """
+    if not content or ("<" not in content and "&" not in content):
+        return content
+    return "<p style='white-space:pre-wrap'>" + html.escape(content).replace("\n", "<br>") + "</p>"
+
+
 def text(content: str, role: str | None = None, wrap: bool = False, selectable: bool = False) -> QLabel:
     lb = QLabel(content)
+    lb.setTextFormat(Qt.TextFormat.PlainText)  # dado do usuário nunca vira HTML
     if role:
         lb.setProperty("role", role)
     lb.setWordWrap(wrap)
@@ -901,7 +917,7 @@ class Modal(QDialog):
         return btn
 
 
-def dialog_form(dialog: QDialog, title: str, width: int = 520) -> QFormLayout:
+def dialog_form(dialog: QDialog, title: str, width: int = 520, scroll: bool = False) -> QFormLayout:
     """Dá a um diálogo de formulário o padrão visual do Modal (título, botão de fechar,
     espaçamentos) e devolve o QFormLayout do corpo. Mantém a classe QDialog original."""
     t = tokens.current()
@@ -918,6 +934,19 @@ def dialog_form(dialog: QDialog, title: str, width: int = 520) -> QFormLayout:
     form.setSpacing(t.space("md"))
     form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+    if scroll:  # formulários longos (Configurações) cabem em telas de 768 px
+        from PySide6.QtWidgets import QScrollArea
+
+        host = QWidget()
+        host.setLayout(form)
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.Shape.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        area.setWidget(host)
+        outer.addWidget(area, 1)
+        dialog.resize(width + 40, 640)
+        return form
     outer.addLayout(form, 1)
     return form
 

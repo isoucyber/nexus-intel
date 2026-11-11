@@ -99,5 +99,9 @@ class PackageIncompatible(PackageError):
     user_message = "Este arquivo .nexus foi criado por uma versão mais nova do NEXUS INTEL. Atualize o aplicativo."
 
 
+class ReauthRequired(NexusError):
+    user_message = "Por segurança, confirme sua senha para continuar."
+
+
 class ProfileError(NexusError):
     user_message = "Não foi possível concluir a operação no perfil."

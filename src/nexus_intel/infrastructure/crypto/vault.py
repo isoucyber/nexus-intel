@@ -86,6 +86,7 @@ class UnlockResult:
     master_key: SecretKey
     username: str
     crypto_mode: str
+    failed_before: int = 0  # tentativas erradas desde o último acesso (mostradas ao usuário)
 
 
 @dataclass
@@ -214,8 +215,9 @@ class Vault:
             raise InvalidCredentials() from None
         finally:
             kek.wipe()
+        failed = int(data.get("throttle", {}).get("failures", 0))
         self._register_success(data)
-        return UnlockResult(SecretKey(master), stored_user, data.get("crypto_mode", CRYPTO_FULL))
+        return UnlockResult(SecretKey(master), stored_user, data.get("crypto_mode", CRYPTO_FULL), failed)
 
     def unlock_with_recovery(self, recovery_text: str) -> UnlockResult:
         data = self._load()
@@ -234,8 +236,9 @@ class Vault:
             raise InvalidRecoveryKey() from None
         finally:
             rkek.wipe()
+        failed = int(data.get("throttle", {}).get("failures", 0))
         self._register_success(data)
-        return UnlockResult(SecretKey(master), data["username"], data.get("crypto_mode", CRYPTO_FULL))
+        return UnlockResult(SecretKey(master), data["username"], data.get("crypto_mode", CRYPTO_FULL), failed)
 
     # --- troca de senha --------------------------------------------------
     def set_password(

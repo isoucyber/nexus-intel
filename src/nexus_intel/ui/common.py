@@ -21,6 +21,7 @@ _ROLES = {"H1": "h1", "H2": "h2", "H3": "h3", "Muted": "muted", "Danger": "dange
 
 def label(text: str, name: str | None = None, wrap: bool = False) -> QLabel:
     lb = QLabel(text)
+    lb.setTextFormat(Qt.TextFormat.PlainText)  # dado do usuário nunca vira HTML
     if name:
         lb.setObjectName(name)
         lb.setProperty("role", _ROLES.get(name, name.lower()))
@@ -85,11 +86,17 @@ def show_error(parent: QWidget | None, exc: BaseException) -> None:
         if window is not None and not isinstance(window, QDialog) and window.isVisible():
             notify(parent, exc.user_message, "warning")
         else:
-            QMessageBox.warning(parent, "NEXUS INTEL", exc.user_message)
+            box = QMessageBox(parent)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle("NEXUS INTEL")
+            box.setTextFormat(Qt.TextFormat.PlainText)
+            box.setText(exc.user_message)
+            box.exec()
         return
     detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Critical)
+    box.setTextFormat(Qt.TextFormat.PlainText)
     box.setWindowTitle("NEXUS INTEL")
     box.setText("Ocorreu um erro inesperado. Nenhum dado parcial foi gravado.")
     box.setDetailedText(detail)
@@ -109,6 +116,7 @@ def confirm(parent: QWidget | None, title: str, text: str, danger: bool = False)
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning if danger else QMessageBox.Icon.Question)
     box.setWindowTitle(title)
+    box.setTextFormat(Qt.TextFormat.PlainText)  # nomes de entidades vêm de dados possivelmente importados
     box.setText(text)
     yes = box.addButton("Confirmar", QMessageBox.ButtonRole.AcceptRole)
     if danger:

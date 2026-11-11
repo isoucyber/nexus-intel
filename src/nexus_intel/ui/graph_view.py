@@ -43,7 +43,15 @@ from nexus_intel.ui.entity_page import evidence_line_html
 from nexus_intel.ui.links import open_external_link
 from nexus_intel.domain.errors import NexusError
 from nexus_intel.ui.design import assets, tokens
-from nexus_intel.ui.design.components import STATUS_LABELS, Button, Card, notify, on_theme, paint_avatar
+from nexus_intel.ui.design.components import (
+    STATUS_LABELS,
+    Button,
+    Card,
+    notify,
+    on_theme,
+    paint_avatar,
+    safe_tooltip,
+)
 
 STATUS_PEN = {
     "verified": Qt.PenStyle.SolidLine,
@@ -96,7 +104,7 @@ class NodeItem(QGraphicsObject):
                       | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
                       | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(f"{data['display_name']}\n{data['type_label']}")
+        self.setToolTip(safe_tooltip(f"{data['display_name']}\n{data['type_label']}"))
         self.setZValue(2)
         text = data["display_name"]
         self.text = QGraphicsSimpleTextItem(text if len(text) <= 28 else text[:26] + "…", self)
@@ -152,8 +160,8 @@ class EdgeItem(QGraphicsPathItem):
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(f"{a.data_['display_name']} — {data['label']} → {b.data_['display_name']}\n"
-                        f"status: {status}\nClique para ver detalhes · botão direito para cortar")
+        self.setToolTip(safe_tooltip(f"{a.data_['display_name']} — {data['label']} → {b.data_['display_name']}\n"
+                        f"status: {status}\nClique para ver detalhes · botão direito para cortar"))
         a.edges.append(self)
         b.edges.append(self)
         self.adjust()

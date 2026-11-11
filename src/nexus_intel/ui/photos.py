@@ -33,7 +33,7 @@ from nexus_intel.domain.errors import NexusError
 from nexus_intel.infrastructure.media.images import MAX_IMAGE_BYTES, display_bytes, render_png
 from nexus_intel.ui import format as fmt
 from nexus_intel.ui.common import confirm
-from nexus_intel.ui.design.components import Button, EmptyState, IconButton, notify, text
+from nexus_intel.ui.design.components import Button, EmptyState, IconButton, notify, safe_tooltip, text
 
 THUMB = 128
 FILE_FILTER = ("Imagens (*.jpg *.jpeg *.png *.webp *.gif *.bmp *.tif *.tiff);;"
@@ -135,7 +135,7 @@ class PhotoGallery(QWidget):
         self._thumbs = {k: v for k, v in self._thumbs.items() if k in alive}
         for r in self.rows:
             item = QListWidgetItem(self._thumb(r), r["original_name"] or "imagem")
-            item.setToolTip(f"{r['original_name']}\n{r['width']}×{r['height']} · {fmt.number(r['size'] // 1024)} KB")
+            item.setToolTip(safe_tooltip(f"{r['original_name']}\n{r['width']}×{r['height']} · {fmt.number(r['size'] // 1024)} KB"))
             item.setSizeHint(QSize(THUMB + 24, THUMB + 40))
             self.grid.addItem(item)
         n = len(self.rows)

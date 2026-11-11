@@ -347,6 +347,11 @@ class ProjectsPage(Page):
         if confirm(self, "Excluir projeto",
                    f"Excluir definitivamente o projeto “{p.name}”?\n\nO arquivo do projeto será apagado "
                    "deste computador. Backups feitos antes continuam existindo.", danger=True):
+            from nexus_intel.ui.auth import ensure_recent_auth
+
+            if not ensure_recent_auth(self, self.manager.session, "Excluir um projeto é definitivo: confirme a "
+                                      "senha deste perfil."):
+                return
             if guarded(self, lambda: self.manager.delete(p.id) or True):
                 notify(self, f"Projeto “{p.name}” excluído.", "success")
             self.refresh()

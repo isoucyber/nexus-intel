@@ -28,7 +28,15 @@ from nexus_intel.application.projects import ProjectManager
 from nexus_intel.application.session import Session
 from nexus_intel.infrastructure.crypto.vault import CRYPTO_FULL
 from nexus_intel.infrastructure.paths import AppPaths, default_paths
-from nexus_intel.ui.auth import ChangePasswordDialog, LoginPage, RecoveryKeyDialog, SetupPage, _password
+from nexus_intel.ui.auth import (
+    ChangePasswordDialog,
+    LoginPage,
+    RecoveryKeyDialog,
+    SetupPage,
+    _password,
+    ensure_recent_auth,
+)
+from nexus_intel.ui import format as fmt
 from nexus_intel.ui.common import button, confirm, guarded, hbox, label, show_error
 from nexus_intel.ui.projects_page import ProjectsPage
 from nexus_intel.ui.design import tokens
@@ -40,6 +48,15 @@ from nexus_intel.ui.workspace import Workspace
 log = logging.getLogger("nexus_intel")
 
 DEFAULTS: dict[str, Any] = {"idle_minutes": 10}
+
+SECURITY_LABELS = {
+    "profile.create": "Perfil criado", "login": "Entrada com senha", "login.recovery": "Entrada com chave de recuperação",
+    "password.change": "Senha alterada", "reauth.ok": "Senha confirmada", "reauth.fail": "Confirmação de senha falhou",
+    "recovery_key.rotate": "Nova chave de recuperação", "identity.rotate": "Nova chave de identidade",
+    "export": "Projeto exportado (.nexus)", "import": "Projeto importado (.nexus)",
+    "import.rejected": "Importação recusada", "project.delete": "Projeto excluído",
+    "profile.update": "Perfil alterado",
+}
 
 THIRD_PARTY = (
     "Qt / PySide6 — LGPL-3.0 · cryptography — Apache-2.0/BSD · SQLCipher — BSD · "
@@ -89,13 +106,14 @@ class SettingsDialog(QDialog):
         self.display_name = QLineEdit(info.display_name if info else "")
         self.display_name.setMaxLength(60)
         self.avatar = AvatarPicker(info.display_name if info else "", info.avatar_path if info else None)
-        form = dialog_form(self, "Configurações", 560)
+        form = dialog_form(self, "Configurações", 560, scroll=True)
         form.addRow(label("Perfil", "H2"))
         form.addRow("Nome de exibição", self.display_name)
         form.addRow("Imagem", self.avatar)
         if info:
             form.addRow("Usuário", label(info.username, "Muted"))
-            form.addRow("Chave de identidade", label(info.fingerprint or "—", "Muted"))
+            # Lida do banco cifrado do perfil (o índice público poderia ter sido editado).
+            form.addRow("Chave de identidade", label(guarded(self, s.fingerprint) or "—", "Muted"))
         form.addRow(hbox(button("Excluir este perfil…", self._delete_profile, "Danger", icon="trash-2"), None))
         form.addRow(label("Aparência", "H2"))
         form.addRow("Tema", self.theme)
@@ -107,6 +125,17 @@ class SettingsDialog(QDialog):
         form.addRow("Criptografia", label(mode, "Muted" if s.crypto_mode == CRYPTO_FULL else "Warning", wrap=True))
         form.addRow(hbox(button("Trocar senha…", self._change_pw), button("Gerar nova chave de recuperação…",
                                                                           self._rotate), None))
+        form.addRow(hbox(button("Gerar nova chave de identidade…", self._rotate_identity), None))
+        form.addRow(label("Registro de segurança", "H2"))
+        events = guarded(self, lambda: s.security_events(8)) or []
+        broken = guarded(self, s.verify_security_log)
+        form.addRow(label("Íntegro (cadeia SHA-256 conferida)" if broken is None else
+                          f"ALTERADO a partir do evento {broken}: o registro foi editado fora do NEXUS.",
+                          "Muted" if broken is None else "Danger", wrap=True))
+        for ev in events:
+            detail = f" — {ev['detail']}" if ev["detail"] else ""
+            form.addRow(label(f"{fmt.absolute(ev['ts'])}  {SECURITY_LABELS.get(ev['kind'], ev['kind'])}{detail}",
+                              "Caption", wrap=True))
         form.addRow(label("Sobre", "H2"))
         form.addRow(label(f"NEXUS INTEL {__version__} · Apache-2.0\nPasta de dados: {s.paths.data}\n\n"
                           f"Componentes de terceiros: {THIRD_PARTY}", "Muted", wrap=True))
@@ -116,11 +145,26 @@ class SettingsDialog(QDialog):
         ChangePasswordDialog(self.win.session, self).exec()
 
     def _rotate(self) -> None:
+        if not ensure_recent_auth(self, self.win.session, "Gerar uma nova chave de recuperação é uma operação "
+                                  "sensível: confirme a senha deste perfil."):
+            return
         if confirm(self, "Nova chave de recuperação",
                    "A chave atual deixará de funcionar. Gerar uma nova agora?"):
             key = guarded(self, self.win.session.rotate_recovery_key)
             if key:
                 RecoveryKeyDialog(key, self).exec()
+
+    def _rotate_identity(self) -> None:
+        if not ensure_recent_auth(self, self.win.session, "Trocar a chave de identidade muda a impressão "
+                                  "digital que assina seus arquivos .nexus: confirme a senha."):
+            return
+        if confirm(self, "Nova chave de identidade",
+                   "Os próximos arquivos .nexus serão assinados com uma chave nova. Avise quem confere sua "
+                   "impressão digital. Continuar?"):
+            fp = guarded(self, self.win.session.rotate_identity)
+            if fp:
+                guarded(self, lambda: self.win.profiles.update(self.win.session))
+                notify(self, f"Nova impressão digital: {fp}", "success")
 
     def _delete_profile(self) -> None:
         if DeleteProfileDialog(self.win, self).exec():
@@ -330,6 +374,11 @@ class MainWindow(QMainWindow):
         self.apply_prefs()
         self.idle.timer.start()
         self.show_projects()
+        n = self.session.failed_before_login
+        if n:
+            notify(self, f"Atenção: {n} tentativa(s) de senha incorreta neste perfil desde o último acesso. "
+                         "Veja o registro de segurança em Configurações.", "warning")
+            self.session.failed_before_login = 0
 
     def export_current(self) -> None:
         from nexus_intel.ui.package_ui import export_flow

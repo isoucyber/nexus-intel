@@ -438,7 +438,7 @@ class ProjectStore:
             "importance": "e.importance DESC, e.display_name_norm",
         }.get(order, "e.updated_at DESC")
         sql = (
-            "SELECT e.id, e.display_name, e.summary, e.importance, e.is_favorite, e.updated_at,"
+            "SELECT e.id, e.display_name, e.summary, e.importance, e.is_favorite, e.updated_at,"  # noqa: S608
             " e.created_at, e.record_status, e.version, t.label AS type_label, t.key AS type_key,"
             " coalesce(e.color, t.color) AS effective_color,"
             " (SELECT count(*) FROM relation r WHERE r.record_status='active' AND"
@@ -829,7 +829,7 @@ class ProjectStore:
     def relations_for(self, eid: str, include_trashed: bool = False) -> list[dict[str, Any]]:
         status_sql = "" if include_trashed else "AND r.record_status='active'"
         rows = self._all(
-            "SELECT r.*, rt.label, rt.inverse_label, rt.directed, rt.key AS type_key,"
+            "SELECT r.*, rt.label, rt.inverse_label, rt.directed, rt.key AS type_key,"  # noqa: S608
             " s.display_name AS source_name, t.display_name AS target_name,"
             " s.record_status AS source_status, t.record_status AS target_status,"
             " (SELECT count(*) FROM evidence v WHERE v.target_kind='relation' AND v.target_id=r.id) AS ev_count"
@@ -1066,12 +1066,12 @@ class ProjectStore:
         block = norm[:3]
         type_sql, tparams = ("AND e.type_id=?", (type_id,)) if type_id else ("", ())
         for r in self._all(
-            "SELECT e.id, e.display_name, e.display_name_norm FROM entity e WHERE e.record_status!='trashed'"
+            "SELECT e.id, e.display_name, e.display_name_norm FROM entity e WHERE e.record_status!='trashed'"  # noqa: S608
             f" AND (e.display_name_norm LIKE ? OR e.display_name_norm = ?) {type_sql} LIMIT 500",
             (f"{block}%", norm, *tparams)):
             consider(r["id"], r["display_name"], r["display_name_norm"])
         for r in self._all(
-            "SELECT e.id, e.display_name, e.display_name_norm FROM entity_alias a JOIN entity e ON e.id=a.entity_id"
+            "SELECT e.id, e.display_name, e.display_name_norm FROM entity_alias a JOIN entity e ON e.id=a.entity_id"  # noqa: S608
             f" WHERE a.alias_norm=? AND e.record_status!='trashed' {type_sql}", (norm, *tparams)):
             consider(r["id"], r["display_name"], r["display_name_norm"], alias=True)
         return sorted((c for c in found.values() if c.score >= DUPLICATE_THRESHOLD),
@@ -1267,7 +1267,7 @@ class ProjectStore:
                 frontier = nxt
             marks = ",".join("?" * len(ids))
             nodes = self._all(
-                "SELECT e.id, e.display_name, e.importance, e.type_id, t.label AS type_label, t.key AS type_key,"
+                "SELECT e.id, e.display_name, e.importance, e.type_id, t.label AS type_label, t.key AS type_key,"  # noqa: S608
                 " coalesce(e.color, t.color) AS color FROM entity e JOIN entity_type t ON t.id=e.type_id"
                 f" WHERE e.record_status='active' AND e.id IN ({marks})", tuple(ids))  # noqa: S608
         else:
@@ -1286,7 +1286,7 @@ class ProjectStore:
             return {"nodes": [], "edges": [], "total_entities": total, "truncated": False}
         marks = ",".join("?" * len(node_ids))
         edges = self._all(
-            "SELECT r.id, r.source_id, r.target_id, r.epistemic_status, rt.label, rt.directed, rt.color"
+            "SELECT r.id, r.source_id, r.target_id, r.epistemic_status, rt.label, rt.directed, rt.color"  # noqa: S608
             f" FROM relation r JOIN relation_type rt ON rt.id=r.type_id WHERE {rel_sql}"  # noqa: S608
             f" AND r.source_id IN ({marks}) AND r.target_id IN ({marks})",
             (*rparams, *node_ids, *node_ids))
@@ -1375,7 +1375,7 @@ class ProjectStore:
         order_sql = {"updated": "n.updated_at DESC, n.rowid DESC", "created": "n.created_at DESC, n.rowid DESC",
                      "title": "lower(n.title), n.updated_at DESC"}.get(order, "n.updated_at DESC")
         return self._all(
-            "SELECT n.*, e.display_name AS entity_name, substr(n.body, 1, 200) AS preview FROM note n"
+            "SELECT n.*, e.display_name AS entity_name, substr(n.body, 1, 200) AS preview FROM note n"  # noqa: S608
             f" LEFT JOIN entity e ON e.id=n.entity_id WHERE {' AND '.join(where)} ORDER BY {order_sql}",  # noqa: S608
             tuple(params))
 

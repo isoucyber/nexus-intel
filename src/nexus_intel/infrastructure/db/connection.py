@@ -52,6 +52,12 @@ def open_database(path: Path, key: SecretKey | None) -> Any:
     conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 5000")
+    # Tabelas temporárias (ordenações, índices transitórios) ficam na memória: nada de
+    # resultado intermediário de consulta em arquivo temporário no disco.
+    conn.execute("PRAGMA temp_store = MEMORY")
+    # Conteúdo apagado é sobrescrito com zeros dentro do arquivo do banco (importa sobretudo
+    # no modo sem cifragem; com SQLCipher as páginas já são cifradas).
+    conn.execute("PRAGMA secure_delete = ON")
     return conn
 
 

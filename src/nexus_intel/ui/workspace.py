@@ -41,6 +41,7 @@ from nexus_intel.ui.design.components import (
     Select,
     notify,
     on_theme,
+    safe_tooltip,
     set_tab_icon,
     text,
 )
@@ -374,7 +375,7 @@ class SourcesPage(Page):
             ex = f" — “{u['excerpt']}”" if u["excerpt"] else ""
             it = QListWidgetItem(f"{u['label'] or '(removido)'}{ex}")
             it.setData(_ROLE, u["entity_id"])
-            it.setToolTip(it.text())
+            it.setToolTip(safe_tooltip(it.text()))
             self.uses.addItem(it)
 
     def _new(self) -> None:
@@ -947,7 +948,7 @@ class Workspace(QWidget):
         type_key = page.entity.get("type_key", "other")
         idx = self.tabs.addTab(page, name if len(name) < 24 else name[:22] + "…")
         set_tab_icon(self.tabs, idx, assets.TYPE_ICONS.get(type_key, "circle"), type_key)
-        self.tabs.setTabToolTip(idx, name)
+        self.tabs.setTabToolTip(idx, safe_tooltip(name))
         self.tabs.setCurrentIndex(idx)
         if self.tabs.count() > 12:  # limite de abas abertas
             self._close_tab(1)

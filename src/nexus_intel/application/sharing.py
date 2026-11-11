@@ -103,6 +103,7 @@ def export_project(manager: ProjectManager, store: ProjectStore, dest: Path, pas
     if len(password) < MIN_PASSWORD_LEN:
         raise NexusError(f"A senha do arquivo precisa ter pelo menos {MIN_PASSWORD_LEN} caracteres.")
     session = manager.session
+    session.require_recent_auth()  # tirar o projeto do computador exige senha recente
     info = manager.get(store.project_id)
     dest = Path(dest)
     if dest.suffix.lower() != EXTENSION:
@@ -129,6 +130,7 @@ def export_project(manager: ProjectManager, store: ProjectStore, dest: Path, pas
     ed_pub = session.identity_public("ed25519")
     manifest = {
         "format": MANIFEST_FORMAT, "kind": "nexus-project", "app_version": __version__,
+        "package_id": secrets_token(16),  # identifica ESTE arquivo: reimportação é detectada
         "min_app_version": MIN_APP_VERSION, "exported_at": now_iso(),
         "schema_version": current_version(store.conn),
         "project": {"id": info.id, "name": info.name, "color": info.color, "icon": info.icon,
@@ -163,12 +165,15 @@ def export_project(manager: ProjectManager, store: ProjectStore, dest: Path, pas
             writer.close()
             out.flush()
             os.fsync(out.fileno())
+        # Um backup só vale se abre: relê o arquivo gravado, decifra e confere tudo antes de entregá-lo.
+        _verify_file(Path(tmp), password)
         os.replace(tmp, dest)
     except BaseException:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(tmp)
         raise
     store.audit("project.export", "project", info.id, f"{dest.name} ({len(shas)} arquivos)")
+    session.security_event("export", f"projeto {info.id} · {len(shas)} arquivo(s) · verificado")
     return ExportResult(dest, dest.stat().st_size, manifest["counts"], len(shas), manifest["signer"]["fingerprint"])
 
 
@@ -278,6 +283,15 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
     return m
 
 
+def _verify_file(path: Path, password: str) -> dict[str, Any]:
+    v = _Verifier()
+    fh, records = _open_records(path, password)
+    with fh:
+        for name, data in records:
+            v.take(name, data)
+    return v.finish()
+
+
 def _open_records(path: Path, password: str) -> tuple[Any, Any]:
     fh = open(path, "rb")  # noqa: SIM115 - fechado por quem chama
     try:
@@ -293,19 +307,27 @@ def preview_package(manager: ProjectManager, path: Path, password: str) -> Packa
     """Decifra e verifica o pacote inteiro sem gravar nada; devolve o resumo para confirmação."""
     path = Path(path)
     v = _Verifier()
-    fh, records = _open_records(path, password)
     files_bytes = 0
-    with fh:
-        for name, data in records:
-            v.take(name, data)
-            if name.startswith("files/"):
-                inspect_image(data)
-                files_bytes += len(data)
-    m = v.finish()
+    try:
+        fh, records = _open_records(path, password)
+        with fh:
+            for name, data in records:
+                v.take(name, data)
+                if name.startswith("files/"):
+                    inspect_image(data)
+                    files_bytes += len(data)
+        m = v.finish()
+    except NexusError as exc:
+        manager.session.security_event("import.rejected", type(exc).__name__)
+        raise
     p = m["project"]
     my_pub = manager.session.identity_public("ed25519")
     existing = {i.id for i in manager.list()}
     notes = []
+    seen = _already_imported(manager, m)
+    if seen:
+        notes.append(f"Este mesmo arquivo já foi importado neste perfil em {seen}. Importar de novo cria "
+                     "outra cópia.")
     if p["id"] in existing:
         notes.append("Já existe um projeto com este identificador neste perfil: a importação criará uma cópia "
                      "separada e não altera o projeto existente.")
@@ -392,7 +414,22 @@ def import_package(manager: ProjectManager, path: Path, password: str) -> Projec
             raise
         session.app_db.execute("UPDATE project_registry SET entity_count=? WHERE id=?",
                                (int(m.get("counts", {}).get("entities", 0)), pid))
+        pkg = str(m.get("package_id", ""))
+        if re.fullmatch(r"[0-9a-f]{32}", pkg):
+            session.app_db.execute(
+                "INSERT OR REPLACE INTO imported_package(package_id, imported_at, project_id, signer)"
+                " VALUES (?,?,?,?)", (pkg, now_iso(), pid, signer))
+        session.security_event("import", f"projeto {pid} · assinado por {signer}")
         return manager.get(pid)
+    except NexusError as exc:
+        if conn is not None:
+            with contextlib.suppress(Exception):
+                conn.close()
+        blobs.close()
+        shutil.rmtree(staging, ignore_errors=True)
+        with contextlib.suppress(Exception):
+            session.security_event("import.rejected", type(exc).__name__)
+        raise
     except BaseException:
         if conn is not None:
             with contextlib.suppress(Exception):
@@ -406,10 +443,19 @@ def import_package(manager: ProjectManager, path: Path, password: str) -> Projec
                 k.wipe()
 
 
-def secrets_token() -> str:
+def secrets_token(nbytes: int = 8) -> str:
     import secrets
 
-    return secrets.token_hex(8)
+    return secrets.token_hex(nbytes)
+
+
+def _already_imported(manager: ProjectManager, m: dict[str, Any]) -> str | None:
+    pkg = str(m.get("package_id", ""))
+    if not re.fullmatch(r"[0-9a-f]{32}", pkg):
+        return None
+    row = manager.session.app_db.execute(
+        "SELECT imported_at FROM imported_package WHERE package_id=?", (pkg,)).fetchone()
+    return row["imported_at"] if row else None
 
 
 def _insert_table(conn: Any, allowed: dict[str, set[str]], table: str, data: bytes) -> None:

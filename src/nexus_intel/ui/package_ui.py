@@ -86,6 +86,11 @@ class ExportDialog(QDialog):
         dest = Path(self.dest.text().strip())
         if dest.suffix.lower() != EXTENSION:
             dest = dest.with_suffix(EXTENSION)
+        from nexus_intel.ui.auth import ensure_recent_auth
+
+        if not ensure_recent_auth(self, self.manager.session, "Exportar tira os dados do computador: confirme "
+                                  "a senha deste perfil."):
+            return
         kdf = getattr(self.manager.session, "_kdf_override", None) or KdfParams()
         try:
             res = _busy(lambda: export_project(self.manager, self.store, dest, self.pw.text(), kdf))

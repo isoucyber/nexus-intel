@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write      # atestado de procedência (Sigstore) dos instaladores
+  attestations: write
 
 jobs:
   build:
@@ -63,6 +65,14 @@ jobs:
             "{0}  {1}" -f (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower(), $_.Name
           } | Out-File -Encoding ascii dist\SHA256SUMS.txt
           Get-Content dist\SHA256SUMS.txt
+
+      - name: Atestado de procedência dos instaladores (verificável com `gh attestation verify`)
+        uses: actions/attest-build-provenance@v2
+        continue-on-error: true
+        with:
+          subject-path: |
+            dist/*.exe
+            dist/*.zip
 
       - uses: actions/upload-artifact@v4
         with:

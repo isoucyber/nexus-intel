@@ -72,11 +72,12 @@ MAX_KDF_MEMORY_KIB = 1024 * 1024  # 1 GiB: um cabeçalho malicioso não trava a 
 MAX_KDF_ITERATIONS = 10
 MAX_KDF_LANES = 16
 MAX_RECIPIENTS = 64
-MAX_TOTAL_PLAINTEXT = 16 * 1024**3
+MAX_TOTAL_PLAINTEXT = 8 * 1024**3  # soma de tudo que for decifrado
 MAX_RECORDS = 200_000
 
 NAME_RE = re.compile(r"^(manifest\.json|signature\.json|tables/[a-z_][a-z0-9_]{0,62}\.json|files/[0-9a-f]{64})$")
-RECORD_LIMITS = {"manifest.json": 8 * 1024**2, "signature.json": 64 * 1024, "tables/": 1024**3,
+# Cada item é lido inteiro na memória: limites mantêm um pacote malicioso longe de esgotar a RAM.
+RECORD_LIMITS = {"manifest.json": 8 * 1024**2, "signature.json": 64 * 1024, "tables/": 256 * 1024**2,
                  "files/": 64 * 1024**2}
 
 _WRAP_AAD_PASSWORD = b"nexus-intel/package/v1/password"

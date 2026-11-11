@@ -192,6 +192,7 @@ class ProfileManager:
                 (folder / "avatar.png").unlink()
         entry["fingerprint"] = session.fingerprint()
         self._save_index(data)
+        session.security_event("profile.update", "nome/imagem")
 
     def delete(self, session: Session, password: str) -> None:
         """Exclui o perfil inteiro (cofre, banco, projetos, fotos). Exige a senha do próprio perfil."""

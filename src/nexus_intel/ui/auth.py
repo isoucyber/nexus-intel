@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -27,6 +26,7 @@ from nexus_intel.infrastructure.crypto.vault import check_password_strength
 from nexus_intel.ui.common import Page, button, card, hbox, label, show_error
 from nexus_intel.ui.design.components import dialog_form
 from nexus_intel.ui.profiles_ui import AvatarPicker, ProfileAvatar
+from nexus_intel.ui.secure_clipboard import copy_secret
 
 TERMS = (
     "O NEXUS INTEL organiza informações que você obteve de forma legítima. Ele não é "
@@ -70,7 +70,8 @@ class RecoveryKeyDialog(QDialog):
         box.setFixedHeight(70)
         box.setStyleSheet("font-family: Consolas, 'JetBrains Mono', monospace; font-size: 16px;")
         lay.addWidget(box)
-        copy = button("Copiar", lambda: QGuiApplication.clipboard().setText(key))
+        copy = button("Copiar (apaga em 60 s)", lambda: copy_secret(key),
+                      tip="Copia sem entrar no histórico da área de transferência do Windows e apaga em 60 segundos")
         lay.addWidget(hbox(copy, None))
         self.ack = QCheckBox("Anotei a chave em um lugar seguro")
         lay.addWidget(self.ack)
@@ -330,6 +331,39 @@ class LoginPage(Page):
         if self.recovery.isVisible():
             self._toggle()
         self.done.emit()
+
+
+class ReauthDialog(QDialog):
+    """Confirmação de senha antes de uma operação sensível (modo “sudo”)."""
+
+    def __init__(self, session: Session, reason: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.session = session
+        self.pw = _password("Senha deste perfil")
+        self.error = label("", "Danger", wrap=True)
+        form = dialog_form(self, "Confirme sua senha", 440)
+        form.addRow(label(reason, "Muted", wrap=True))
+        form.addRow("Senha", self.pw)
+        form.addRow(self.error)
+        self.pw.returnPressed.connect(self._check)
+        form.addRow(hbox(None, button("Cancelar", self.reject), button("Confirmar", self._check, "Primary")))
+
+    def _check(self) -> None:
+        try:
+            _busy(lambda: self.session.verify_password(self.pw.text()))
+        except NexusError as exc:
+            self.error.setText(exc.user_message)
+            self.pw.selectAll()
+            return
+        self.pw.clear()
+        self.accept()
+
+
+def ensure_recent_auth(parent: QWidget | None, session: Session, reason: str) -> bool:
+    """True se a senha foi confirmada há pouco ou o usuário a confirmou agora."""
+    if session.recently_authenticated():
+        return True
+    return bool(ReauthDialog(session, reason, parent).exec())
 
 
 class ChangePasswordDialog(QDialog):

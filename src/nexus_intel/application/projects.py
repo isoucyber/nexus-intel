@@ -71,6 +71,15 @@ class ProjectManager:
         self.current: ProjectStore | None = None
         self._lock: InstanceLock | None = None
         session.on_lock(self.close_current)
+        self._clean_interrupted_imports()
+
+    def _clean_interrupted_imports(self) -> None:
+        """Importação interrompida (queda de energia) deixa uma pasta de preparação: nunca vira projeto."""
+        root = self.session.paths.projects
+        if root.exists():
+            for d in root.glob(".import-*"):
+                if d.is_dir() and d.parent == root:
+                    shutil.rmtree(d, ignore_errors=True)
 
     # --- lista -----------------------------------------------------------
     def list(self) -> list[ProjectInfo]:
@@ -221,7 +230,8 @@ class ProjectManager:
         )
 
     def delete(self, project_id: str) -> None:
-        """Exclusão definitiva: apaga o arquivo e a pasta do projeto."""
+        """Exclusão definitiva: apaga o arquivo e a pasta do projeto (exige senha recente)."""
+        self.session.require_recent_auth()
         info = self.get(project_id)
         if self.current and self.current.project_id == project_id:
             self.close_current()
@@ -231,3 +241,4 @@ class ProjectManager:
         if folder.parent == root and folder.name == project_id:
             shutil.rmtree(folder, ignore_errors=True)
         self.session.app_db.execute("DELETE FROM project_registry WHERE id=?", (project_id,))
+        self.session.security_event("project.delete", f"projeto {project_id}")

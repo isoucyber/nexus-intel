@@ -35,7 +35,24 @@ jobs:
         run: ruff check --select F,E9 src tests
       - name: Camadas da arquitetura
         run: lint-imports
+      - name: Análise estática de segurança (regras Bandit via ruff)
+        run: ruff check --select S --ignore S101 src
       - name: Testes
         run: python -m pytest -q -ra
       - name: Verificar que o SQLCipher foi carregado
         run: python -c "import sqlcipher3; print('SQLCipher', sqlcipher3.sqlite_version)"
+
+  dependencias:
+    name: Dependências (vulnerabilidades conhecidas)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar o aplicativo (sem ferramentas de desenvolvimento)
+        run: python -m pip install . pip-audit
+      - name: pip-audit (base OSV/PyPI)
+        run: pip-audit --progress-spinner off --desc on
+
