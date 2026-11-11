@@ -156,6 +156,7 @@ class ProfileTile(QFrame):
     """Cartão clicável de um perfil na tela de seleção."""
 
     activated = Signal(str)
+    HEIGHT = 176
 
     def __init__(self, info: ProfileInfo, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -164,7 +165,7 @@ class ProfileTile(QFrame):
         self.setProperty("interactive", "true")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setFixedSize(180, 176)
+        self.setFixedSize(180, self.HEIGHT)
         self.setAccessibleName(f"Entrar como {info.display_name}")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 16, 12, 12)
@@ -218,7 +219,7 @@ class ProfilesPage(Page):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(self.grid_host)
-        scroll.setMaximumHeight(420)
+        self.scroll = scroll
         self.layout_.addWidget(scroll)
         self.new_btn = Button("Novo perfil", "secondary", "plus", on_click=self.create_requested.emit)
         self.layout_.addWidget(self.new_btn, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -236,5 +237,8 @@ class ProfilesPage(Page):
             tile.activated.connect(self.chosen.emit)
             self.grid.addWidget(tile, i // cols, i % cols)
             self.tiles.append(tile)
+        rows = max(1, (len(infos) + cols - 1) // cols)
+        # Altura exata das linhas de cartões (até duas linhas visíveis; mais que isso rola).
+        self.scroll.setFixedHeight(min(rows, 2) * (ProfileTile.HEIGHT + 16) + 8)
         if self.tiles:
             self.tiles[0].setFocus()
