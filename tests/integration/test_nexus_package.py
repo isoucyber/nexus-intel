@@ -70,6 +70,7 @@ def test_full_round_trip_to_another_installation(origin, tmp_path):
     session, _ = dest_profiles.create("Destino", "destino", "senha-do-destino-1234", encrypt=ENCRYPT)
     manager = ProjectManager(session)
     origin["manager"].close_current()
+    origin["session"].lock()  # fecha o banco do perfil de origem (no Windows, arquivo aberto não se apaga)
     import shutil
 
     shutil.rmtree(tmp_path / "pc-origem")  # nenhum caminho de origem é necessário

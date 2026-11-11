@@ -1,23 +1,17 @@
-## NEXUS INTEL 0.3.3 — cortar relações e links clicáveis
+## NEXUS INTEL 0.3.4 — perfis, fotografias, notas e projetos compartilháveis
 
-**Baixe** `NexusIntel-Setup-*.exe` abaixo e execute. Se o Windows SmartScreen avisar, clique em **Mais informações → Executar assim mesmo**. Seus usuários e projetos continuam funcionando.
+**Baixe** `NexusIntel-Setup-*.exe` abaixo e execute. Se o Windows SmartScreen avisar, clique em **Mais informações → Executar assim mesmo**. Seu usuário atual vira automaticamente o primeiro perfil, com todos os projetos.
 
 ### Novidades
-- **Cortar relação**: pelo botão direito na relação (na ficha da entidade ou numa linha do grafo) ou pelo botão “Cortar relação”. A confirmação mostra as duas pontas; as entidades nunca são apagadas
-- **Relações na lixeira**: relações cortadas ficam na Lixeira, de onde podem ser restauradas ou excluídas de vez (junto com as fontes ligadas a elas, sem deixar vínculos órfãos)
-- **Grafo**: clique numa linha para ver o tipo, o status e as fontes da relação; ao cortar, a linha some na hora e os nós ficam no lugar
-- **Links clicáveis**: endereços em fontes e atributos (Site, URL do perfil…) abrem no navegador padrão do Windows ao clicar. Só http e https são aceitos; link inválido mostra um aviso
+- **Vários perfis no mesmo computador**: cada pessoa tem seu perfil com nome, imagem, senha, projetos, notas, fotografias e preferências próprios. Os dados de cada perfil são cifrados com a chave daquele perfil; um não consegue abrir os dados do outro. Trocar de perfil fecha tudo e limpa a memória
+- **Fotografias nas entidades**: nova aba “Fotografias” na ficha, com arrastar e soltar, galeria de miniaturas, visualização ampliada com setas, substituir e remover. Aceita JPG, PNG, WEBP, GIF, BMP e TIFF, conferidos pelo conteúdo real do arquivo. As imagens ficam cifradas dentro do projeto
+- **Notas**: bloco de notas do projeto com salvamento automático, pesquisa, ordem por título ou data e vínculo opcional com uma entidade (botão de lápis na ficha)
+- **Exportar e importar projetos (.nexus)**: um arquivo cifrado por senha (AES-256-GCM) e assinado digitalmente pelo seu perfil, com entidades, relações, fontes, notas e as fotografias de verdade. A importação mostra um resumo verificado antes de gravar e nunca sobrescreve um projeto existente
+- **Grafo**: selecione uma linha e pressione **Backspace** para cortar a relação; o aviso traz “Desfazer”. As entidades nunca são apagadas
 
 ### Segurança
-- Nenhum link abre sem um clique seu; o restante do aplicativo continua 100% offline
-
-### Acabamento
-- Janelas de cadastro e edição (fonte, entidade, afirmação, relação, projeto, senha, configurações) seguem o mesmo visual: título no topo, botão de fechar e espaçamento padrão
-- Ícones das abas mudam de cor junto com o tema
-- Menu lateral mais compacto: cabe melhor em telas de 768 px de altura
-- Ao abrir um projeto, o primeiro item do menu não aparece mais com contorno de foco
-- O número de entidades no cartão do projeto é atualizado também ao abrir o projeto
+- Senha errada ou arquivo .nexus alterado em qualquer byte: nada é importado
+- Algoritmos e decisões documentados em `docs/adr/0003-perfis-fotos-e-pacote-nexus.md`
 
 ### Correções
-- O histórico de uma entidade às vezes mostrava duas alterações do mesmo segundo fora de ordem
-- Trocar o tema depois de fechar um projeto podia mostrar uma mensagem de erro inesperado
+- A tela de cadastro não mostra mais nomes pessoais como exemplo; o projeto de exemplo usa nomes genéricos

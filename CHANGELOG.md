@@ -2,6 +2,23 @@
 
 Formato baseado em Keep a Changelog; versões seguem SemVer.
 
+## [0.3.4] — 2026-11-10
+### Adicionado
+- Perfis locais isolados (`ProfileManager`): pasta, cofre, banco e projetos por perfil, cifrados com a chave
+  do perfil; seleção, criação com avatar, edição, troca e exclusão (exige senha). Migração automática da
+  instalação de usuário único. Par de chaves X25519/Ed25519 por perfil (privadas cifradas).
+- Fotografias das entidades: armazenamento por SHA-256 cifrado com AES-256-GCM, validação por conteúdo
+  (Pillow), deduplicação e coleta de arquivos sem uso; galeria com arrastar e soltar e visualizador.
+- Nexus Notepad: notas do projeto com salvamento automático, busca, ordenação e vínculo com entidade.
+- Pacote `.nexus` (formato 1): AES-256-GCM em blocos, Argon2id, assinatura Ed25519, SHA-256 por item;
+  modo por identidade (X25519) preparado. Exportação e importação com pré-visualização verificada.
+- Backspace no grafo corta a relação selecionada, com “Desfazer”.
+- Migrações: projeto `0002_notas_fotos`, perfil `0002_identidade`. ADR-0003.
+### Alterado
+- Caminhos de projeto recalculados a partir do ID validado (não do registro).
+- Autoteste do executável cobre perfis, fotos em todos os formatos e ida e volta do `.nexus`.
+- Placeholders genéricos na criação de conta; exemplo guiado sem nomes pessoais.
+
 ## [0.3.3] — 2026-11-07
 ### Adicionado
 - Cortar relação na ficha da entidade (botão e menu) e no grafo (menu da linha), com confirmação; entidades preservadas.

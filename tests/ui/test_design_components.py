@@ -155,7 +155,7 @@ def test_critical_flows_create_search_trash_lock(qtbot, paths, monkeypatch):
     assert set(ws.pending_items) == {"attachments", "map", "ai", "semantic", "suggestions", "backup"}
     for row in ws.pending_items.values():
         assert "em preparação" in row.toolTip().lower()
-    assert set(ws.nav_buttons) == {k for k, _ in ws.NAV} and len(ws.NAV) == 15
+    assert set(ws.nav_buttons) == {k for k, _ in ws.NAV} and len(ws.NAV) == 16  # + Notas (0.3.4)
     for key, _ in ws.NAV:  # todos os módulos abrem e voltam sem erro
         ws.go(key)
         assert ws.stack.currentWidget() is ws.pages[key]

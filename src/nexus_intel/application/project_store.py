@@ -1393,10 +1393,16 @@ class ProjectStore:
             raise NexusError("A entidade vinculada não existe mais.")
         return entity_id
 
-    @staticmethod
-    def _note_ts() -> str:
-        # Microssegundos: o salvamento automático acontece várias vezes no mesmo segundo.
-        return datetime.now(UTC).isoformat(timespec="microseconds")
+    def _note_ts(self) -> str:
+        """Carimbo estritamente crescente entre as notas (o relógio do Windows tem resolução grossa e
+        o salvamento automático acontece várias vezes por segundo): a ordem “mais recente” é sempre exata."""
+        now = datetime.now(UTC)
+        row = self._one("SELECT max(updated_at) AS m FROM note")
+        if row and row["m"]:
+            last = datetime.fromisoformat(row["m"])
+            if now <= last:
+                now = last + timedelta(microseconds=1)
+        return now.isoformat(timespec="microseconds")
 
     def create_note(self, title: str = "", body: str = "", entity_id: str | None = None) -> str:
         nid, ts = new_ulid(), self._note_ts()

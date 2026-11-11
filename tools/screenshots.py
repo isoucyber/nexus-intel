@@ -61,6 +61,8 @@ def main() -> int:
     shot(win, "primeiro-uso")
 
     sp = win.setup_page
+    if hasattr(sp, "name"):
+        sp.name.setText("Analista")
     sp.user.setText("analista")
     sp.pw.setText("senha-de-demonstracao-2026")
     sp.pw2.setText("senha-de-demonstracao-2026")
@@ -111,13 +113,63 @@ def main() -> int:
         shot(win, name)
 
     helena = ws.store.search("helena prado")[0]["id"]
+    if hasattr(ws.store, "add_photo"):
+        import io as _io
+
+        from PIL import Image, ImageDraw
+
+        for i, (bg, fmt) in enumerate((((52, 73, 94), "PNG"), ((120, 66, 18), "JPEG"), ((22, 101, 52), "WEBP"))):
+            im = Image.new("RGB", (640, 480), bg)
+            d = ImageDraw.Draw(im)
+            d.ellipse((220, 90, 420, 290), fill=(230, 230, 230))
+            d.rectangle((160, 300, 480, 480), fill=(200, 200, 200))
+            buf = _io.BytesIO()
+            im.save(buf, fmt)
+            ws.store.add_photo(helena, buf.getvalue(), f"registro-{i + 1}.{fmt.lower()}")
     ws.open_entity(helena)
     shot(win, "entidade-resumo")
     page = ws.tabs.currentWidget() if hasattr(ws, "tabs") else None
     if page is not None and hasattr(page, "tabs"):
-        for i, name in ((1, "entidade-atributos"), (2, "entidade-relacoes")):
+        for i in range(1, min(4, page.tabs.count())):
             page.tabs.setCurrentIndex(i)
-            shot(win, name)
+            title = page.tabs.tabText(i).split(" (")[0].lower().replace(" ", "-")
+            shot(win, f"entidade-{title}")
+        if hasattr(page, "photos") and page.photos.rows:
+            from nexus_intel.ui.photos import PhotoViewer
+
+            viewer = PhotoViewer(ws.store, page.photos.rows, 0, win)
+            viewer.show()
+            shot(viewer, "foto-ampliada")
+            viewer.close()
+
+    if "notes" in getattr(ws, "pages", {}):
+        ws.store.create_note("Hipóteses iniciais", "Verificar vínculo entre a Transportes Adriático e o porto.\n\n"
+                             "- Conferir registro do veículo\n- Pedir certidão atualizada", entity_id=helena)
+        ws.store.create_note("Pendências da semana", "Ligar para a fonte B. Revisar linha do tempo.")
+        ws.go("notes")
+        ws.pages["notes"].table.selectRow(0)
+        shot(win, "notas")
+
+    try:
+        from nexus_intel.application.sharing import export_project, preview_package
+        from nexus_intel.infrastructure.crypto.keys import KdfParams
+        from nexus_intel.ui.package_ui import ExportDialog, PreviewDialog
+
+        ws.go("io")
+        shot(win, "importacao-exportacao-nexus")
+        dlg = ExportDialog(win.manager, ws.store, win)
+        dlg.show()
+        shot(dlg, "exportar-nexus")
+        dlg.close()
+        fast = KdfParams(memory_kib=64 * 1024, iterations=2, lanes=2)
+        res = export_project(win.manager, ws.store, Path(tmp) / "demo.nexus", "senha-de-demonstracao", fast)
+        pv = preview_package(win.manager, res.path, "senha-de-demonstracao")
+        prev = PreviewDialog(pv, win)
+        prev.show()
+        shot(prev, "importar-nexus-previa")
+        prev.close()
+    except ImportError:
+        pass
 
     if hasattr(ws, "search"):
         ws.search.setFocus()
@@ -152,6 +204,13 @@ def main() -> int:
 
     win.lock()
     shot(win, "bloqueado")
+    if hasattr(win, "profiles"):
+        other, _ = win.profiles.create("Equipe de campo", "equipe_campo", "senha-de-demonstracao-2026")
+        other.lock()
+        win.switch_profile()
+        shot(win, "perfis")
+        win.show_setup(first=False)
+        shot(win, "novo-perfil")
     win.close()
     app.processEvents()
     print(f"{count} capturas em {out}")
