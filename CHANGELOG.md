@@ -14,6 +14,12 @@ Formato baseado em Keep a Changelog; versões seguem SemVer.
   modo por identidade (X25519) preparado. Exportação e importação com pré-visualização verificada.
 - Backspace no grafo corta a relação selecionada, com “Desfazer”.
 - Migrações: projeto `0002_notas_fotos`, perfil `0002_identidade`. ADR-0003.
+- Segurança: reautenticação no backend (`require_recent_auth`) para exportar, rotacionar chaves e excluir
+  projeto; registro de segurança encadeado (`security_event`, migração `0003_seguranca`); aviso de tentativas
+  erradas; detecção de reimportação (`package_id`); exportação verificada; limpeza de importação interrompida;
+  rotação da chave de identidade; `safe_tooltip` e texto puro para dado do usuário; área de transferência
+  protegida; `temp_store=MEMORY` e `secure_delete`; CI com regras de segurança, `pip-audit` e atestado de
+  procedência. Modelo de ameaças e relatório de riscos em `docs/seguranca/`.
 ### Alterado
 - Caminhos de projeto recalculados a partir do ID validado (não do registro).
 - Autoteste do executável cobre perfis, fotos em todos os formatos e ida e volta do `.nexus`.

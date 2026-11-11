@@ -65,6 +65,7 @@ Migrações de banco (só criam tabelas novas):
 |----------|--------------------------|--------------------------------------------|
 | projeto  | `0002_notas_fotos.sql`   | `note`, `attachment`, `entity_photo`        |
 | perfil   | `0002_identidade.sql`    | `identity_key` (privadas cifradas)          |
+| perfil   | `0003_seguranca.sql`     | `security_event`, `imported_package`        |
 
 Antes de migrar um banco existente, o NEXUS já faz uma cópia cifrada do arquivo
 (mecanismo da 0.1, aparece na tela Backup).
