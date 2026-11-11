@@ -693,6 +693,8 @@ class SearchBox(Input):
 class Workspace(QWidget):
     back_to_projects = Signal()
     lock_requested = Signal()
+    export_package_requested = Signal()
+    import_package_requested = Signal()
 
     # Grupos da navegação: (chave, rótulo, ícone, em_preparação). Módulos em preparação
     # abrem uma página que explica o que existe e o que falta, sem dados simulados.
@@ -809,7 +811,9 @@ class Workspace(QWidget):
             "audit": AuditPage(store),
             "timeline": TimelinePage(store),
             "notes": NotesPage(store),
-            "io": ImportExportPage(lambda: self.pages["graph"].export_png()),
+            "io": ImportExportPage(lambda: self.pages["graph"].export_png(),
+                                   lambda: self.export_package_requested.emit(),
+                                   lambda: self.import_package_requested.emit()),
             "backup": BackupPage(project_path),
             **{k: make_pending(k) for k in ("attachments", "map", "ai", "semantic", "suggestions")},
         }

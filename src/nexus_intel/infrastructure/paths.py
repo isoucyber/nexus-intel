@@ -32,6 +32,18 @@ class AppPaths:
     def projects(self) -> Path:
         return self.data / "projects"
 
+    @property
+    def profiles_root(self) -> Path:
+        return self.data / "profiles"
+
+    @property
+    def profiles_index(self) -> Path:
+        return self.data / "profiles.json"
+
+    def for_profile(self, profile_id: str) -> AppPaths:
+        """Pastas privadas de um perfil: cofre, banco e projetos ficam em profiles/<id>/."""
+        return AppPaths(self.profiles_root / profile_id, self.config, self.logs)
+
     def ensure(self) -> AppPaths:
         for p in (self.data, self.config, self.logs, self.projects):
             p.mkdir(parents=True, exist_ok=True)

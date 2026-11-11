@@ -9,6 +9,7 @@ from typing import Any
 
 from nexus_intel.domain.errors import SessionLocked
 from nexus_intel.domain.ids import new_ulid
+from nexus_intel.infrastructure.crypto import identity
 from nexus_intel.infrastructure.crypto.keys import KdfParams, SecretKey, calibrate_kdf, hkdf
 from nexus_intel.infrastructure.crypto.vault import CRYPTO_FULL, CRYPTO_NONE, Vault
 from nexus_intel.infrastructure.db.connection import open_database, sqlcipher_available
@@ -21,7 +22,9 @@ def now_iso() -> str:
 
 
 class Session:
-    def __init__(self, paths: AppPaths, kdf_params: KdfParams | None = None) -> None:
+    def __init__(self, paths: AppPaths, kdf_params: KdfParams | None = None,
+                 profile_id: str | None = None) -> None:
+        self.profile_id = profile_id
         self.paths = paths.ensure()
         self.vault = Vault(paths.vault)
         self._kdf_override = kdf_params
@@ -122,12 +125,39 @@ class Session:
         try:
             self._app_conn = open_database(self.paths.app_db, key)
             migrate(self._app_conn, "app", self.paths.app_db)
+            self._ensure_identity()
         except BaseException:
             self.lock()
             raise
         finally:
             if key is not None:
                 key.wipe()
+
+    # --- identidade (X25519 / Ed25519) -----------------------------------
+    def _ensure_identity(self) -> None:
+        have = {r["kind"] for r in self.app_db.execute("SELECT kind FROM identity_key").fetchall()}
+        for kind in identity.KINDS:
+            if kind not in have:
+                k = identity.generate(kind, self.master)
+                self.app_db.execute(
+                    "INSERT INTO identity_key(kind, public_key, wrapped_private, created_at) VALUES (?,?,?,?)",
+                    (kind, k.public_b64, json.dumps(k.wrapped), now_iso()))
+
+    def _stored_identity(self, kind: str) -> identity.StoredKey:
+        row = self.app_db.execute("SELECT * FROM identity_key WHERE kind=?", (kind,)).fetchone()
+        if not row:
+            raise SessionLocked()
+        return identity.StoredKey(kind, row["public_key"], json.loads(row["wrapped_private"]))
+
+    def identity_public(self, kind: str) -> bytes:
+        return identity.public_raw(self._stored_identity(kind))
+
+    def identity_private(self, kind: str) -> bytes:
+        """Chave privada decifrada só para uso imediato (assinar / abrir pacote)."""
+        return identity.unwrap_private(self._stored_identity(kind), self.master)
+
+    def fingerprint(self, kind: str = "ed25519") -> str:
+        return identity.fingerprint(self.identity_public(kind))
 
     def _log_login(self, success: bool, reason: str) -> None:
         self.app_db.execute(

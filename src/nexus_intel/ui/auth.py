@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
@@ -11,17 +12,21 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QFormLayout,
+    QFrame,
     QLineEdit,
     QPlainTextEdit,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from nexus_intel.application.profiles import ProfileManager
 from nexus_intel.application.session import Session
 from nexus_intel.domain.errors import NexusError, ThrottledError
 from nexus_intel.infrastructure.crypto.vault import check_password_strength
 from nexus_intel.ui.common import Page, button, card, hbox, label, show_error
 from nexus_intel.ui.design.components import dialog_form
+from nexus_intel.ui.profiles_ui import AvatarPicker, ProfileAvatar
 
 TERMS = (
     "O NEXUS INTEL organiza informações que você obteve de forma legítima. Ele não é "
@@ -80,28 +85,45 @@ class RecoveryKeyDialog(QDialog):
 
 
 class SetupPage(Page):
-    done = Signal()
+    """Criação de perfil (primeiro uso ou “Novo perfil”)."""
 
-    def __init__(self, session: Session) -> None:
+    done = Signal(object)  # Session já aberta
+    back = Signal()
+
+    def __init__(self, profiles: ProfileManager) -> None:
         super().__init__()
-        self.session = session
+        self.profiles = profiles
+        self.session: Session | None = None
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("Digite seu nome")
         self.user = QLineEdit()
         self.user.setPlaceholderText("Nome de usuário")
         self.pw = _password("Crie uma senha (mín. 12 caracteres)")
         self.pw2 = _password("Confirme sua senha")
-        self.encrypt = QCheckBox("Cifrar todos os dados (recomendado)")
+        self.avatar = AvatarPicker()
+        self.name.textChanged.connect(lambda t: self.avatar.set_name(t or self.user.text()))
+        self.user.textChanged.connect(lambda t: self.avatar.set_name(self.name.text() or t))
+        self.encrypt = QCheckBox("Cifrar todos os dados deste perfil (recomendado)")
         self.encrypt.setChecked(Session.encryption_supported())
         self.encrypt.setEnabled(Session.encryption_supported())
+        self.encrypt.toggled.connect(self._warn_plain)
+        self.plain_warning = label(
+            "Sem cifragem, os dados deste perfil ficam protegidos só pela tela de entrada: outro perfil "
+            "deste computador poderia ler os arquivos. Use apenas se o disco já for cifrado (BitLocker).",
+            "Warning", wrap=True)
+        self.plain_warning.hide()
         self.terms = QCheckBox("Li e aceito o termo de uso responsável")
         self.error = label("", "Danger", wrap=True)
         self.strength = label("", "Muted")
         self.pw.textChanged.connect(self._strength)
 
         form = QFormLayout()
+        form.addRow("Nome de exibição", self.name)
         form.addRow("Usuário", self.user)
         form.addRow("Senha", self.pw)
         form.addRow("", self.strength)
         form.addRow("Confirmar senha", self.pw2)
+        form.addRow("Imagem", self.avatar)
         holder = QWidget()
         holder.setLayout(form)
 
@@ -109,19 +131,42 @@ class SetupPage(Page):
             "Atenção: o componente de criptografia (SQLCipher) não foi encontrado nesta "
             "instalação. Os dados ficarão sem cifragem; use a criptografia do disco (BitLocker)."
         )
-        create = button("Criar usuário", self._create, "Primary")
+        create = button("Criar perfil", self._create, "Primary")
+        self.back_btn = button("Voltar", self.back.emit, icon="arrow-left")
         self.pw2.returnPressed.connect(self._create)
+        self.title = label("Bem-vindo. Vamos criar seu perfil local.", "H2")
         body = card(
             label("NEXUS INTEL", "Brand"),
-            label("Bem-vindo. Vamos criar seu usuário local.", "H2"),
-            label("Tudo fica neste computador. Nenhuma conta online é necessária.", "Muted", wrap=True),
-            holder, self.encrypt, label(warn, "Warning", wrap=True),
-            label(TERMS, "Muted", wrap=True), self.terms, self.error, hbox(None, create),
+            self.title,
+            label("Tudo fica neste computador. Nenhuma conta online é necessária. Cada perfil tem seus "
+                  "próprios projetos e dados.", "Muted", wrap=True),
+            holder, self.encrypt, self.plain_warning, label(warn, "Warning", wrap=True),
+            label(TERMS, "Muted", wrap=True), self.terms, self.error, hbox(self.back_btn, None, create),
         )
-        body.setFixedWidth(560)
-        self.layout_.addStretch(1)
-        self.layout_.addWidget(hbox(None, body, None))
-        self.layout_.addStretch(1)
+        body.setFixedWidth(580)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        inner = QWidget()
+        il = QVBoxLayout(inner)
+        il.addStretch(1)
+        il.addWidget(hbox(None, body, None))
+        il.addStretch(1)
+        scroll.setWidget(inner)
+        self.layout_.addWidget(scroll)
+
+    def prepare(self, first_profile: bool) -> None:
+        for e in (self.name, self.user, self.pw, self.pw2):
+            e.clear()
+        self.terms.setChecked(False)
+        self.error.setText("")
+        self.avatar.clear()
+        self.back_btn.setVisible(not first_profile)
+        self.title.setText("Bem-vindo. Vamos criar seu perfil local." if first_profile else "Novo perfil")
+        self.name.setFocus()
+
+    def _warn_plain(self, checked: bool) -> None:
+        self.plain_warning.setVisible(not checked and Session.encryption_supported())
 
     def _strength(self, text: str) -> None:
         classes = sum(any(f(c) for c in text) for f in (str.islower, str.isupper, str.isdigit,
@@ -136,6 +181,9 @@ class SetupPage(Page):
 
     def _create(self) -> None:
         self.error.setText("")
+        if not self.user.text().strip():
+            self.error.setText("Informe um nome de usuário.")
+            return
         if self.pw.text() != self.pw2.text():
             self.error.setText("As senhas não coincidem.")
             return
@@ -144,64 +192,88 @@ class SetupPage(Page):
             return
         try:
             check_password_strength(self.pw.text(), self.user.text())
-            key = _busy(lambda: self.session.setup(self.user.text(), self.pw.text(),
-                                                   encrypt=self.encrypt.isChecked()))
+            session, key = _busy(lambda: self.profiles.create(
+                self.name.text(), self.user.text(), self.pw.text(), encrypt=self.encrypt.isChecked(),
+                avatar=self.avatar.data))
         except NexusError as exc:
             self.error.setText(exc.user_message)
             return
         except Exception as exc:  # noqa: BLE001
             show_error(self, exc)
             return
-        self.session.set_setting("terms_accepted_at", datetime.now(UTC).isoformat(timespec="seconds"))
+        session.set_setting("terms_accepted_at", datetime.now(UTC).isoformat(timespec="seconds"))
         RecoveryKeyDialog(key, self).exec()
         self.pw.clear()
         self.pw2.clear()
-        self.done.emit()
+        self.session = session
+        self.done.emit(session)
 
 
 class LoginPage(Page):
-    done = Signal()
+    """Entrada no perfil escolhido (senha ou chave de recuperação)."""
 
-    def __init__(self, session: Session) -> None:
+    done = Signal()
+    switch_profile = Signal()
+
+    def __init__(self, session: Session | None = None) -> None:
         super().__init__()
-        self.session = session
+        self.session: Session = session  # type: ignore[assignment]
+        self.avatar = ProfileAvatar(72)
+        self.who = label("", "H2")
         self.user = QLineEdit()
-        self.pw = _password("senha")
+        self.user.hide()  # o perfil já foi escolhido: o usuário vem do cofre
+        self.pw = _password("Senha")
         self.recovery = QLineEdit()
         self.recovery.setPlaceholderText("XXXX-XXXX-…  (52 caracteres)")
         self.recovery.hide()
         self.error = label("", "Danger", wrap=True)
-        self.title = label("Entrar", "H2")
+        self.title = label("Entrar", "Muted")
         self.go = button("Entrar", self._login, "Primary")
         self.toggle = button("Esqueci a senha", self._toggle)
+        self.switch_btn = button("Trocar de perfil", self.switch_profile.emit, icon="users")
         self.pw.returnPressed.connect(self._login)
         self.recovery.returnPressed.connect(self._login)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
 
         form = QFormLayout()
-        form.addRow("Usuário", self.user)
         form.addRow("Senha", self.pw)
         holder = QWidget()
         holder.setLayout(form)
         self.form_holder = holder
         self.recovery_hint = label(
-            "Digite a chave de recuperação que você anotou ao criar o usuário. Depois de "
+            "Digite a chave de recuperação que você anotou ao criar o perfil. Depois de "
             "entrar, você vai definir uma nova senha.", "Muted", wrap=True)
         self.recovery_hint.hide()
-        body = card(label("NEXUS INTEL", "Brand"), self.title, holder, self.recovery_hint,
-                    self.recovery, self.error, hbox(self.toggle, None, self.go))
+        head = QVBoxLayout()
+        head.setSpacing(6)
+        head.addWidget(self.avatar, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.who.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        head.addWidget(self.who)
+        head.addWidget(self.title)
+        head_w = QWidget()
+        head_w.setLayout(head)
+        body = card(label("NEXUS INTEL", "Brand"), head_w, holder, self.recovery_hint,
+                    self.recovery, self.error, hbox(self.toggle, None, self.go), hbox(self.switch_btn, None))
         body.setFixedWidth(440)
         self.layout_.addStretch(1)
         self.layout_.addWidget(hbox(None, body, None))
         self.layout_.addStretch(1)
 
-    def prepare(self) -> None:
+    def prepare(self, session: Session | None = None, info: Any = None) -> None:
+        if session is not None:
+            self.session = session
         self.user.setText(self.session.vault.username() if self.session.initialized else "")
+        name = getattr(info, "display_name", None) or self.user.text()
+        self.who.setText(name)
+        self.avatar.set_profile(name, getattr(info, "avatar_path", None))
         self.pw.clear()
         self.recovery.clear()
         self.error.setText("")
-        (self.pw if self.user.text() else self.user).setFocus()
+        if self.recovery.isVisible():
+            self._toggle()
+        self.pw.setFocus()
         self._tick()
 
     def _toggle(self) -> None:
@@ -214,7 +286,7 @@ class LoginPage(Page):
         self.error.setText("")
 
     def _tick(self) -> None:
-        wait = self.session.vault.seconds_until_allowed() if self.session.initialized else 0
+        wait = self.session.vault.seconds_until_allowed() if self.session and self.session.initialized else 0
         if wait > 0:
             self.go.setEnabled(False)
             self.error.setText(f"Muitas tentativas incorretas. Aguarde {int(wait) + 1} s.")

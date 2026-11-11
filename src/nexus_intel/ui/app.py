@@ -9,12 +9,13 @@ import sys
 from typing import Any
 
 from PySide6.QtCore import QEvent, QObject, QTimer
-from PySide6.QtGui import QFont, QKeySequence, QShortcut
+from PySide6.QtGui import QFont, QGuiApplication, QKeySequence, QPixmapCache, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
     QDoubleSpinBox,
+    QLineEdit,
     QMainWindow,
     QSpinBox,
     QStackedWidget,
@@ -22,16 +23,18 @@ from PySide6.QtWidgets import (
 )
 
 from nexus_intel import __version__
+from nexus_intel.application.profiles import ProfileManager
 from nexus_intel.application.projects import ProjectManager
 from nexus_intel.application.session import Session
 from nexus_intel.infrastructure.crypto.vault import CRYPTO_FULL
 from nexus_intel.infrastructure.paths import AppPaths, default_paths
-from nexus_intel.ui.auth import ChangePasswordDialog, LoginPage, RecoveryKeyDialog, SetupPage
+from nexus_intel.ui.auth import ChangePasswordDialog, LoginPage, RecoveryKeyDialog, SetupPage, _password
 from nexus_intel.ui.common import button, confirm, guarded, hbox, label, show_error
 from nexus_intel.ui.projects_page import ProjectsPage
 from nexus_intel.ui.design import tokens
-from nexus_intel.ui.design.components import dialog_form
+from nexus_intel.ui.design.components import dialog_form, notify
 from nexus_intel.ui.design.manager import apply_appearance
+from nexus_intel.ui.profiles_ui import AvatarPicker, ProfilesPage
 from nexus_intel.ui.workspace import Workspace
 
 log = logging.getLogger("nexus_intel")
@@ -82,7 +85,18 @@ class SettingsDialog(QDialog):
         self.idle.setRange(1, 240)
         self.idle.setSuffix(" min")
         self.idle.setValue(int(win.pref("idle_minutes")))
+        info = win.profile_info()
+        self.display_name = QLineEdit(info.display_name if info else "")
+        self.display_name.setMaxLength(60)
+        self.avatar = AvatarPicker(info.display_name if info else "", info.avatar_path if info else None)
         form = dialog_form(self, "Configurações", 560)
+        form.addRow(label("Perfil", "H2"))
+        form.addRow("Nome de exibição", self.display_name)
+        form.addRow("Imagem", self.avatar)
+        if info:
+            form.addRow("Usuário", label(info.username, "Muted"))
+            form.addRow("Chave de identidade", label(info.fingerprint or "—", "Muted"))
+        form.addRow(hbox(button("Excluir este perfil…", self._delete_profile, "Danger", icon="trash-2"), None))
         form.addRow(label("Aparência", "H2"))
         form.addRow("Tema", self.theme)
         form.addRow("Tamanho do texto", self.scale)
@@ -108,7 +122,18 @@ class SettingsDialog(QDialog):
             if key:
                 RecoveryKeyDialog(key, self).exec()
 
+    def _delete_profile(self) -> None:
+        if DeleteProfileDialog(self.win, self).exec():
+            self.done(0)
+
     def accept(self) -> None:
+        info = self.win.profile_info()
+        name = self.display_name.text().strip()
+        if info is not None and name and (name != info.display_name or self.avatar.data is not None
+                                          or self.avatar.removed):
+            guarded(self, lambda: self.win.profiles.update(
+                self.win.session, display_name=name, avatar=self.avatar.data, remove_avatar=self.avatar.removed))
+            self.win.refresh_profile_ui()
         self.win.set_appearance(replace(self.win.appearance(), theme=self.theme.currentData(),
                                         scale=round(self.scale.value(), 2)))
         self.win.set_pref("idle_minutes", self.idle.value())
@@ -116,24 +141,70 @@ class SettingsDialog(QDialog):
         super().accept()
 
 
+class DeleteProfileDialog(QDialog):
+    """Exclusão do perfil: exige a senha do próprio perfil e digitar o nome de exibição."""
+
+    def __init__(self, win: MainWindow, parent: QWidget | None = None) -> None:
+        super().__init__(parent or win)
+        self.win = win
+        info = win.profile_info()
+        self.expected = info.display_name if info else ""
+        self.pw = _password("Senha deste perfil")
+        self.confirm_name = QLineEdit()
+        self.confirm_name.setPlaceholderText(self.expected)
+        self.error = label("", "Danger", wrap=True)
+        form = dialog_form(self, "Excluir perfil", 480)
+        form.addRow(label(
+            f"Isto apaga DEFINITIVAMENTE o perfil “{self.expected}”: projetos, entidades, fotografias, notas, "
+            "preferências e chaves. Outros perfis não são afetados. Não há como desfazer.", "Warning", wrap=True))
+        form.addRow("Digite o nome do perfil", self.confirm_name)
+        form.addRow("Senha", self.pw)
+        form.addRow(self.error)
+        self.ok = button("Excluir perfil", self._delete, "Danger")
+        self.ok.setEnabled(False)
+        self.confirm_name.textChanged.connect(lambda t: self.ok.setEnabled(t.strip() == self.expected))
+        form.addRow(hbox(None, button("Cancelar", self.reject), self.ok))
+
+    def _delete(self) -> None:
+        from nexus_intel.domain.errors import NexusError
+
+        self.win._drop_workspace()
+        if self.win.manager:
+            self.win.manager.close_current()
+        try:
+            self.win.profiles.delete(self.win.session, self.pw.text())
+        except NexusError as exc:
+            self.error.setText(exc.user_message)
+            return
+        self.accept()
+        self.win.after_profile_deleted()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, paths: AppPaths | None = None) -> None:
         super().__init__()
         self.setWindowTitle("NEXUS INTEL")
         self.resize(1360, 860)
-        self.session = Session(paths or default_paths())
+        self.root_paths = paths or default_paths()
+        self.profiles = ProfileManager(self.root_paths)  # migra a instalação de usuário único, se houver
+        self.session: Session | None = None
         self.manager: ProjectManager | None = None
         self.workspace: Workspace | None = None
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
 
-        self.setup_page = SetupPage(self.session)
-        self.login_page = LoginPage(self.session)
-        self.setup_page.done.connect(self._after_login)
+        self.profiles_page = ProfilesPage(self.profiles)
+        self.setup_page = SetupPage(self.profiles)
+        self.login_page = LoginPage()
+        self.profiles_page.chosen.connect(self.choose_profile)
+        self.profiles_page.create_requested.connect(lambda: self.show_setup(first=False))
+        self.setup_page.done.connect(self._after_setup)
+        self.setup_page.back.connect(self.show_profiles_list)
         self.login_page.done.connect(self._after_login)
+        self.login_page.switch_profile.connect(self.switch_profile)
         self.projects_page: ProjectsPage | None = None
-        self.stack.addWidget(self.setup_page)
-        self.stack.addWidget(self.login_page)
+        for page in (self.profiles_page, self.setup_page, self.login_page):
+            self.stack.addWidget(page)
 
         self.idle = IdleWatcher(DEFAULTS["idle_minutes"] * 60_000, self.lock)
         QApplication.instance().installEventFilter(self.idle)
@@ -143,7 +214,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ prefs
     def pref(self, key: str) -> Any:
-        if not self.session.unlocked:
+        if self.session is None or not self.session.unlocked:
             return DEFAULTS[key]
         return self.session.get_setting(key, DEFAULTS[key])
 
@@ -152,7 +223,7 @@ class MainWindow(QMainWindow):
 
     def appearance(self) -> tokens.Appearance:
         """Aparência salva; aceita o formato antigo (theme/font_scale) da v0.1."""
-        if not self.session.unlocked:
+        if self.session is None or not self.session.unlocked:
             return tokens.Appearance()
         data = self.session.get_setting("appearance")
         if data is None:
@@ -169,26 +240,111 @@ class MainWindow(QMainWindow):
         self.idle.set_timeout(int(self.pref("idle_minutes")) * 60_000)
 
     # ------------------------------------------------------------ fluxo
+    def profile_info(self) -> Any:
+        if self.session is None or not self.session.profile_id:
+            return None
+        try:
+            return self.profiles.get(self.session.profile_id)
+        except Exception:  # noqa: BLE001
+            return None
+
     def _show_entry(self) -> None:
-        if self.session.initialized:
-            self.login_page.prepare()
-            self.stack.setCurrentWidget(self.login_page)
+        infos = self.profiles.list()
+        if not infos:
+            self.session = None
+            self.show_setup(first=True)
+        elif self.session is not None and self.session.initialized:
+            self._show_login()
+        elif len(infos) == 1:
+            self.choose_profile(infos[0].id)
         else:
-            self.stack.setCurrentWidget(self.setup_page)
+            self.show_profiles_list()
+
+    def show_setup(self, first: bool) -> None:
+        self.setup_page.prepare(first)
+        self.stack.setCurrentWidget(self.setup_page)
+
+    def show_profiles_list(self) -> None:
+        self.profiles_page.refresh()
+        self.stack.setCurrentWidget(self.profiles_page)
+        self.setWindowTitle("NEXUS INTEL")
+
+    def choose_profile(self, profile_id: str) -> None:
+        if self.session is not None and self.session.unlocked:
+            self.lock(show=False)
+        session = guarded(self, lambda: self.profiles.session_for(profile_id))
+        if session is None:
+            return
+        self.session = session
+        self._show_login()
+
+    def _show_login(self) -> None:
+        assert self.session is not None
+        self.login_page.prepare(self.session, self.profile_info())
+        self.stack.setCurrentWidget(self.login_page)
+
+    def switch_profile(self) -> None:
+        """Encerra a sessão atual (apaga chaves e caches) e volta à seleção de perfis."""
+        if self.session is not None and self.session.unlocked:
+            self.lock(show=False)
+        self.session = None
+        self.show_profiles_list()
+
+    def _after_setup(self, session: Session) -> None:
+        self.session = session
+        self._after_login()
+
+    def after_profile_deleted(self) -> None:
+        self._clear_private_caches()
+        self.session = None
+        self.manager = None
+        self.idle.timer.stop()
+        apply_appearance(tokens.Appearance())
+        if self.projects_page is not None:
+            self.projects_page.projects = []
+            self.projects_page.grid.set_items([])
+        if self.profiles.list():
+            self.show_profiles_list()
+        else:
+            self.show_setup(first=True)
+
+    def refresh_profile_ui(self) -> None:
+        info = self.profile_info()
+        if self.projects_page is not None and info is not None:
+            self.projects_page.set_profile_name(info.display_name)
 
     def _after_login(self) -> None:
+        assert self.session is not None
         self.manager = ProjectManager(self.session)
         if self.projects_page is None:
             self.projects_page = ProjectsPage(self.manager)
             self.projects_page.open_project.connect(self.open_project)
             self.projects_page.lock_requested.connect(self.lock)
             self.projects_page.settings_requested.connect(lambda: SettingsDialog(self).exec())
+            self.projects_page.switch_profile_requested.connect(self.switch_profile)
+            self.projects_page.import_requested.connect(self.import_package)
             self.stack.addWidget(self.projects_page)
         else:
             self.projects_page.manager = self.manager
+        self.refresh_profile_ui()
         self.apply_prefs()
         self.idle.timer.start()
         self.show_projects()
+
+    def export_current(self) -> None:
+        from nexus_intel.ui.package_ui import export_flow
+
+        if self.manager is not None and self.manager.current is not None and self.workspace is not None:
+            export_flow(self.workspace, self.manager, self.manager.current)
+
+    def import_package(self) -> None:
+        from nexus_intel.ui.package_ui import import_flow
+
+        pid = import_flow(self)
+        if pid and self.workspace is None and self.projects_page is not None:
+            self.projects_page.refresh()
+        elif pid:
+            notify(self, "O projeto importado aparece na lista de projetos.", "info")
 
     def show_projects(self) -> None:
         if self.manager:
@@ -214,6 +370,8 @@ class MainWindow(QMainWindow):
             return
         self.workspace.back_to_projects.connect(self.show_projects)
         self.workspace.lock_requested.connect(self.lock)
+        self.workspace.export_package_requested.connect(self.export_current)
+        self.workspace.import_package_requested.connect(self.import_package)
         self.stack.addWidget(self.workspace)
         self.stack.setCurrentWidget(self.workspace)
         self.setWindowTitle(f"{info.name} — NEXUS INTEL")
@@ -225,17 +383,32 @@ class MainWindow(QMainWindow):
             self.workspace.deleteLater()
             self.workspace = None
 
-    def lock(self) -> None:
-        if not self.session.unlocked:
+    def _clear_private_caches(self) -> None:
+        """Nada de um perfil fica visível para o próximo: imagens em cache e área de transferência."""
+        QPixmapCache.clear()
+        cb = QGuiApplication.clipboard()
+        if cb is not None and cb.ownsClipboard():
+            cb.clear()
+
+    def lock(self, show: bool = True) -> None:
+        if self.session is None or not self.session.unlocked:
             return
         for w in QApplication.topLevelWidgets():
             if isinstance(w, QDialog) and w.isVisible():
                 w.reject()
         self._drop_workspace()
+        if self.manager:
+            self.manager.close_current()
         self.session.lock()  # fecha projeto, banco e apaga chaves
+        self.manager = None
+        self._clear_private_caches()
         self.idle.timer.stop()
         apply_appearance(tokens.Appearance())
-        self._show_entry()
+        if self.projects_page is not None:
+            self.projects_page.projects = []
+            self.projects_page.grid.set_items([])
+        if show:
+            self._show_entry()
 
     def closeEvent(self, event: Any) -> None:  # noqa: N802
         try:
@@ -243,7 +416,8 @@ class MainWindow(QMainWindow):
                 self.workspace.shutdown()
             if self.manager:
                 self.manager.close_current()
-            self.session.lock()
+            if self.session is not None:
+                self.session.lock()
         finally:
             super().closeEvent(event)
 

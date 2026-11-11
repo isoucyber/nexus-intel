@@ -210,6 +210,8 @@ class ProjectsPage(Page):
     open_project = Signal(str)
     lock_requested = Signal()
     settings_requested = Signal()
+    switch_profile_requested = Signal()
+    import_requested = Signal()
 
     def __init__(self, manager: ProjectManager) -> None:
         super().__init__()
@@ -222,6 +224,9 @@ class ProjectsPage(Page):
         top.addWidget(label("NEXUS INTEL", "Brand"))
         top.addWidget(Badge(f"v{__version__}", "accent", tooltip="Versão instalada"))
         top.addStretch(1)
+        self.profile_btn = Button("Perfil", "ghost", "users", on_click=self.switch_profile_requested.emit,
+                                  tooltip="Perfil ativo — clique para trocar de perfil")
+        top.addWidget(self.profile_btn)
         top.addWidget(Button("Configurações", "ghost", "settings", on_click=self.settings_requested.emit))
         top.addWidget(Button("Bloquear", "ghost", "lock", on_click=self.lock_requested.emit, shortcut="Ctrl+L"))
         self.layout_.addLayout(top)
@@ -237,6 +242,8 @@ class ProjectsPage(Page):
         self.search.setFixedWidth(280)
         self.search.textChanged.connect(lambda _: self._render())
         title_row.addWidget(self.search)
+        title_row.addWidget(Button("Importar .nexus", "secondary", "download", on_click=self.import_requested.emit,
+                                   tooltip="Importar um projeto compartilhado (arquivo .nexus cifrado)"))
         title_row.addWidget(Button("Novo projeto", "primary", "plus", on_click=self._new))
         self.layout_.addLayout(title_row)
 
@@ -280,6 +287,9 @@ class ProjectsPage(Page):
             self.stack.addWidget(w)
         self.stack.setCurrentIndex(0)  # carregando até a primeira leitura
         self.layout_.addWidget(self.stack, 1)
+
+    def set_profile_name(self, name: str) -> None:
+        self.profile_btn.setText(name)
 
     # ----------------------------------------------------------------- dados
     def refresh(self) -> None:

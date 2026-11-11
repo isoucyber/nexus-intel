@@ -44,12 +44,12 @@ SPECS: dict[str, ModuleSpec] = {s.key: s for s in (
     ModuleSpec(
         "attachments", "Anexos cifrados", "file-text",
         "Guardar documentos, imagens e áudios dentro do projeto, cifrados com a chave do próprio projeto.",
-        ("Chave exclusiva por projeto e cifragem AES-256-GCM já usadas pelo banco do projeto.",
-         "Fontes e evidências que poderão apontar para um anexo."),
-        ("Armazenamento de arquivos cifrados por projeto (tabela e pasta).",
-         "Fluxo para abrir um anexo decifrando-o só na memória.",
-         "Verificação de integridade (hash) de cada arquivo."),
-        "Criar o armazenamento cifrado de anexos e a tabela de metadados (nome, tipo, tamanho, data, hash)."),
+        ("Fotografias nas entidades (aba Fotografias da ficha): arquivos cifrados com AES-256-GCM, "
+         "identificados pelo SHA-256 e abertos só na memória.",
+         "Exportação .nexus que leva os arquivos junto com o projeto."),
+        ("Documentos (PDF, textos) e áudios como anexos de fontes e evidências.",
+         "Lista central de todos os anexos do projeto."),
+        "Estender o armazenamento das fotografias para documentos ligados a fontes."),
     ModuleSpec(
         "map", "Mapa offline", "map-pin",
         "Ver localizações do projeto (como Veneza) num mapa que funciona sem internet.",
@@ -183,18 +183,30 @@ def make_pending(key: str) -> PendingModulePage:
 class ImportExportPage(Page):
     """Agrupa o que existe hoje (imagem do grafo) e marca o que não existe."""
 
-    def __init__(self, export_graph: Callable[[], Any]) -> None:
+    def __init__(self, export_graph: Callable[[], Any], export_package: Callable[[], Any] | None = None,
+                 import_package: Callable[[], Any] | None = None) -> None:
         super().__init__()
         self.layout_.addWidget(SectionHeader(
             "Importação e exportação",
             "Saídas e entradas de dados do projeto. Só aparecem como disponíveis as que já funcionam."))
         exp = Card("Exportação", icon="download")
-        self.export_btn = Button("Exportar imagem do grafo (PNG)", "primary", "image", on_click=export_graph)
+        self.package_btn = Button("Exportar projeto (.nexus)", "primary", "download",
+                                  on_click=export_package or (lambda: None))
+        self.package_btn.setEnabled(export_package is not None)
+        exp.add(_line("Projeto completo cifrado (.nexus)", "Disponível", "success", self.package_btn,
+                      "Entidades, relações, fontes, notas e as fotografias de verdade, num arquivo cifrado "
+                      "(AES-256-GCM) por senha e assinado pelo seu perfil. Para enviar a outra pessoa."))
+        self.export_btn = Button("Exportar imagem do grafo (PNG)", "secondary", "image", on_click=export_graph)
         exp.add(_line("Imagem do grafo (PNG)", "Disponível", "success", self.export_btn,
                       "Você escolhe a pasta e o nome; o local é mostrado ao concluir."))
         exp.add(_line("Dados do projeto (JSON, CSV)", "Não implementado", "neutral", None,
                       "Ainda não há formato de exportação de dados."))
         imp = Card("Importação", icon="upload")
+        self.import_btn = Button("Importar .nexus…", "secondary", "upload", on_click=import_package or (lambda: None))
+        self.import_btn.setEnabled(import_package is not None)
+        imp.add(_line("Projeto .nexus", "Disponível", "success", self.import_btn,
+                      "Verifica senha, integridade e assinatura antes de gravar. Entra como projeto novo; "
+                      "nenhum projeto existente é sobrescrito."))
         imp.add(_line("Planilhas, JSON e outros formatos", "Não implementado", "neutral", None,
                       "Ainda não há importação. Quando houver, nada será sobrescrito sem confirmação."))
         self.layout_.addWidget(exp)

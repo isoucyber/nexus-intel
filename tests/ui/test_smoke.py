@@ -50,7 +50,7 @@ def test_full_flow(win, qtbot):
     assert graph.view.scene().items(), "grafo vazio"
 
     store = ws.store
-    joao = store.search("joao")[0]["id"]
+    joao = store.search("pessoa exemplo")[0]["id"]
     ws.open_entity(joao)
     page = ws.tabs.currentWidget()
     assert isinstance(page, EntityPage)
