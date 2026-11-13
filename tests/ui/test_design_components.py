@@ -152,15 +152,16 @@ def test_critical_flows_create_search_trash_lock(qtbot, paths, monkeypatch):
     ws = win.workspace
 
     # módulos sem backend aparecem desabilitados e explicados, nunca com dados simulados
-    assert set(ws.pending_items) == {"attachments", "map", "ai", "semantic", "suggestions", "backup"}
+    assert set(ws.pending_items) == {"attachments", "map", "backup"}
     for row in ws.pending_items.values():
         assert "em preparação" in row.toolTip().lower()
     assert set(ws.nav_buttons) == {k for k, _ in ws.NAV} and len(ws.NAV) == 16  # + Notas (0.3.4)
     for key, _ in ws.NAV:  # todos os módulos abrem e voltam sem erro
         ws.go(key)
         assert ws.stack.currentWidget() is ws.pages[key]
-    ws.go("ai")
-    assert "Indisponível" in " ".join(w.accessibleName() for w in ws.pages["ai"].findChildren(QWidget))
+    ws.go("ai")  # sem mecanismo de IA no endereço padrão: "IA indisponível", nunca simulado
+    qtbot.waitUntil(lambda: ws.pages["ai"].status is not None, timeout=10000)
+    assert "IA indisponível" in " ".join(w.accessibleName() for w in ws.pages["ai"].findChildren(QWidget))
     ws.go("backup")
     assert ws.pages["backup"].count == 0  # projeto novo: nenhuma cópia real encontrada
 

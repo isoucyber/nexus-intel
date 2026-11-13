@@ -1,4 +1,4 @@
-# NEXUS INTEL — Modelo de ameaças (0.3.4)
+# NEXUS INTEL — Modelo de ameaças (0.3.4, com adendo da 0.4: IA e voz)
 
 Escopo: aplicativo de desktop Windows, Python 3.12 + PySide6 (Qt Widgets, **não** Electron, sem
 navegador embutido, sem servidor, sem rede própria). Dados ficam no computador; a única saída
@@ -81,3 +81,19 @@ forem configurados para texto puro.
 - **Imagem PNG do grafo** exportada pelo usuário sai sem cifragem (ação explícita).
 - **DPAPI do Windows não é usado**: amarraria os dados à conta do Windows e impediria restaurar
   em outro computador; a proteção vem da senha do perfil (decisão documentada no ADR-0003).
+
+## 6. Adendo 0.4 — Assistente de IA e voz (ADR-0004)
+
+Mudança de fronteira: o app passa a fazer **requisições HTTP para um servidor de IA no próprio
+computador** (loopback) e a iniciar **programas de voz** (Piper, PowerShell/SAPI). O microfone
+pode ser aberto pelo usuário.
+
+| # | Cenário | Vetor | Mitigação (0.4) | Residual |
+|---|---|---|---|---|
+| 11 | Injeção de instruções pelos dados | Nome, nota ou documento (ex.: de um `.nexus` recebido) com "ignore as regras e…" | A IA não escreve: só ferramentas de leitura, navegação e **sugestões pendentes**; instrução explícita de tratar dados como dados; limite de rodadas e de sugestões; aprovação revalida os dados | Um modelo enganado pode sugerir algo errado ou responder errado: o selo da frase e a aprovação humana são a barreira |
+| 12 | Citação falsa | Modelo inventa fonte ou ID | Marca só vale se existe e foi lida por ferramenta nesta conversa; inválida é removida e contada; atribuição automática só com o dado literal na frase e sem negação | Frase interpretativa pode estar errada, mas aparece como "Interpretação da IA" |
+| 13 | Vazamento para a rede | Endereço de IA remoto, proxy ou redirecionamento | Só loopback; sem proxy; sem redirecionamento; selo "Local/Externo" | Outro programa ouvindo na porta local do Ollama receberia os pedidos (exige malware local, fora do escopo) |
+| 14 | Exposição de dados sensíveis à IA | Ferramentas devolvendo tudo | Observações privadas nunca; sensíveis só com opção explícita; IA local por padrão | — |
+| 15 | Injeção de comando na voz | Texto falado com metacaracteres | Texto pela entrada padrão; argumentos em lista, sem shell | Executável do Piper trocado por outro (exige acesso de escrita local) |
+| 16 | Escuta indevida | Microfone aberto | Só sob comando, com indicador; sem escuta contínua; áudio só na memória | Malware local pode usar o microfone por conta própria |
+| 17 | Modelo/voz adulterado no download | Arquivo trocado | Revisão fixa do repositório + SHA-256 por arquivo; `.part` até conferir | Confiança no publicador original (Hugging Face / rhasspy / Systran) |

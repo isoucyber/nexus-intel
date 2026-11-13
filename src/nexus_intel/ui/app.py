@@ -43,6 +43,7 @@ from nexus_intel.ui.design import tokens
 from nexus_intel.ui.design.components import dialog_form, notify
 from nexus_intel.ui.design.manager import apply_appearance
 from nexus_intel.ui.profiles_ui import AvatarPicker, ProfilesPage
+from nexus_intel.ui.ai_common import PrefsStore
 from nexus_intel.ui.workspace import Workspace
 
 log = logging.getLogger("nexus_intel")
@@ -412,7 +413,12 @@ class MainWindow(QMainWindow):
         info = self.manager.get(project_id)
         self._drop_workspace()
         try:
-            self.workspace = Workspace(store, info.name, info.color, info.path)
+            session = self.session
+            profile = self.profile_info()
+            prefs = PrefsStore(lambda: session.get_setting("ai") if session.unlocked else None,
+                               lambda d: session.set_setting("ai", d) if session.unlocked else None)
+            user = profile.display_name if profile else ""
+            self.workspace = Workspace(store, info.name, info.color, info.path, ai_prefs=prefs, user_name=user)
         except Exception as exc:  # noqa: BLE001
             self.manager.close_current()
             show_error(self, exc)

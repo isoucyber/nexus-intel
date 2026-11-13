@@ -52,7 +52,7 @@ from nexus_intel.infrastructure.package import container
 MANIFEST_FORMAT = 1
 MIN_APP_VERSION = "0.3.4"
 EXTENSION = ".nexus"
-_SKIP_TABLES = re.compile(r"^(sqlite_|entity_fts)")
+_SKIP_TABLES = re.compile(r"^(sqlite_|entity_fts|embedding$)")  # embedding: índice derivado, refeito no destino
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 

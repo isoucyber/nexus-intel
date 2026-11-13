@@ -51,6 +51,9 @@ from nexus_intel.ui.entity_page import EntityPage
 from nexus_intel.ui.graph_view import GraphPage
 from nexus_intel.ui.links import open_external_link
 from nexus_intel.ui.notes_page import NotesPage
+from nexus_intel.ui.ai_common import PrefsStore
+from nexus_intel.ui.ai_pages import SemanticPage, SuggestionsPage
+from nexus_intel.ui.assistant_page import AssistantPage
 from nexus_intel.ui.module_pages import SPECS, BackupPage, ImportExportPage, make_pending
 from nexus_intel.ui.timeline_page import TimelinePage
 
@@ -711,9 +714,9 @@ class Workspace(QWidget):
             ("map", "Mapa offline", "map-pin", True),
         )),
         ("Inteligência", (
-            ("ai", "IA e análises", "sparkles", True),
-            ("semantic", "Busca semântica", "file-search", True),
-            ("suggestions", "Sugestões e aprovações", "git-merge", True),
+            ("ai", "IA e análises", "sparkles", False),
+            ("semantic", "Busca semântica", "file-search", False),
+            ("suggestions", "Sugestões e aprovações", "git-merge", False),
         )),
         ("Dados", (
             ("quality", "Qualidade", "shield-check", False),
@@ -728,7 +731,8 @@ class Workspace(QWidget):
     NAV = tuple((k, lb) for _g, items in GROUPS for k, lb, _i, _p in items)
 
     def __init__(self, store: ProjectStore, project_name: str, color: str,
-                 project_path: Path | None = None) -> None:
+                 project_path: Path | None = None, ai_prefs: PrefsStore | None = None,
+                 user_name: str = "", ai_client: Any = None) -> None:
         super().__init__()
         self.store = store
         self.setProperty("page", "true")
@@ -816,8 +820,13 @@ class Workspace(QWidget):
                                    lambda: self.export_package_requested.emit(),
                                    lambda: self.import_package_requested.emit()),
             "backup": BackupPage(project_path),
-            **{k: make_pending(k) for k in ("attachments", "map", "ai", "semantic", "suggestions")},
+            **{k: make_pending(k) for k in ("attachments", "map")},
         }
+        ai_prefs = ai_prefs or PrefsStore()
+        client_kw = {"client_factory": ai_client} if ai_client is not None else {}
+        self.pages["ai"] = AssistantPage(store, ai_prefs, user_name, **client_kw)
+        self.pages["semantic"] = SemanticPage(store, ai_prefs, **client_kw)
+        self.pages["suggestions"] = SuggestionsPage(store)
         for page in self.pages.values():
             self.stack.addWidget(page)
             if hasattr(page, "open_entity"):
@@ -825,6 +834,9 @@ class Workspace(QWidget):
             if hasattr(page, "changed"):
                 page.changed.connect(self._data_changed)
         self.pages["home"].go_to.connect(self._go_to)
+        self.pages["ai"].go_to.connect(self._go_to)
+        self.pages["ai"].graph_focus.connect(self._show_in_graph)
+        self.pages["suggestions"].count_changed.connect(self._set_pending_count)
         self.tabs.addTab(self.stack, "")
         self.tabs.tabBar().setTabButton(0, self.tabs.tabBar().ButtonPosition.RightSide, None)
         ml.addWidget(self.tabs, 1)
@@ -836,10 +848,13 @@ class Workspace(QWidget):
         QShortcut(QKeySequence("Ctrl+N"), self, activated=lambda: (self.go("entities"), self.pages["entities"].new_entity()))
         QShortcut(QKeySequence("Ctrl+G"), self, activated=lambda: self.go("graph"))
         QShortcut(QKeySequence("Ctrl+W"), self, activated=lambda: self._close_tab(self.tabs.currentIndex()))
+        QShortcut(QKeySequence("Ctrl+J"), self, activated=self.focus_assistant)
+        QShortcut(QKeySequence("Ctrl+Shift+Space"), self, activated=self.talk)
         self._loaded: set[str] = set()
         self._graph_dirty = False
         self._current = "home"
         on_theme(self, lambda _t: self._label_section_tab())
+        self._set_pending_count(self.pages["suggestions"].box.count_pending())
         self.go("home" if store.count_entities() else "entities")
         # Sem anel de foco no 1º item do menu ao abrir: o foco vai para a área de conteúdo.
         QTimer.singleShot(0, lambda: isValid(self.tabs) and self.tabs.setFocus(Qt.FocusReason.OtherFocusReason))
@@ -871,15 +886,29 @@ class Workspace(QWidget):
         Sem isso, caixas de seleção destruídas avisam “mudei” e disparam recargas
         sobre widgets que já não existem.
         """
-        try:  # grava a nota em edição antes de fechar o projeto
-            self.pages["notes"].shutdown()
-        except Exception:  # noqa: BLE001, S110 - fechar sempre completa
-            pass
+        for key in ("notes", "ai"):  # grava a nota em edição; cala a voz e fecha o microfone
+            try:
+                self.pages[key].shutdown()
+            except Exception:  # noqa: BLE001, S110 - fechar sempre completa
+                pass
         for obj in [self, *self.findChildren(QObject)]:
             obj.blockSignals(True)
             if isinstance(obj, QTimer):
                 obj.stop()
         self.search.popup.hide()
+
+    def focus_assistant(self) -> None:
+        self.go("ai")
+        self.pages["ai"].input.setFocus()
+
+    def talk(self) -> None:
+        if self._current != "ai":
+            self.go("ai")
+        self.pages["ai"].toggle_mic()
+
+    def _set_pending_count(self, n: int) -> None:
+        label = self.LABELS["suggestions"]
+        self.nav_buttons["suggestions"].setText(f"{label} ({n})" if n else label)
 
     def _new_note_for(self, eid: str) -> None:
         self.go("notes")
@@ -975,3 +1004,6 @@ class Workspace(QWidget):
             current.reset()
         elif current is self.pages["home"]:
             current.refresh()
+        elif current is self.pages["suggestions"]:
+            current.refresh()
+        self._set_pending_count(self.pages["suggestions"].box.count_pending())
