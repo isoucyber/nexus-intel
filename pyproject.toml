@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nexus-intel"
 version = "0.3.4"
-description = "Central local de conhecimento e análise com proveniência, grafo, mapa e IA com citações."
+description = "Central local de conhecimento e análise com proveniência, grafo, mapa e IA com citações e voz."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
@@ -21,6 +21,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Voz do assistente (ADR-0004): microfone e reconhecimento de fala locais. A síntese de voz
+# usa o Piper como programa SEPARADO (python tools/baixar_voz.py --instalar-piper).
+voz = [
+    "sounddevice>=0.4",          # microfone e alto-falante (PortAudio, MIT)
+    "faster-whisper>=1.0",       # reconhecimento de fala local (MIT)
+]
 dev = [
     "pytest>=8",
     "pytest-qt>=4.4",

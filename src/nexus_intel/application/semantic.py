@@ -89,37 +89,43 @@ class SemanticIndex:
         done = 0
         for i in range(0, len(todo), batch):
             chunk = todo[i:i + batch]
-            texts = [self.entity_text(eid) for eid in chunk]
-            vectors = self.embed(texts)
-            if len(vectors) != len(chunk):
-                raise ValueError("o modelo de vetores devolveu uma quantidade diferente de vetores")
-            with Tx(self.store.conn):
-                for eid, txt, vec in zip(chunk, texts, vectors, strict=True):
-                    arr = _unit(np.asarray(vec, dtype=np.float32))
-                    self.store.conn.execute(
-                        "INSERT INTO embedding(entity_id, model, dim, text_sha256, vector, updated_at)"
-                        " VALUES (?,?,?,?,?,?) ON CONFLICT(entity_id, model) DO UPDATE SET"
-                        " dim=excluded.dim, text_sha256=excluded.text_sha256, vector=excluded.vector,"
-                        " updated_at=excluded.updated_at",
-                        (eid, self.model, int(arr.size), hashlib.sha256(txt.encode("utf-8")).hexdigest(),
-                         arr.tobytes(), now_iso()))
+            self.store_vectors(chunk, self.embed([self.entity_text(eid) for eid in chunk]))
             done += len(chunk)
             if progress:
                 progress(done, len(todo))
         return done
 
+    def store_vectors(self, ids: list[str], vectors: list[list[float]]) -> None:
+        """Grava vetores já calculados (o cálculo pode ter rodado em outra thread)."""
+        if len(vectors) != len(ids):
+            raise ValueError("o modelo de vetores devolveu uma quantidade diferente de vetores")
+        with Tx(self.store.conn):
+            for eid, vec in zip(ids, vectors, strict=True):
+                txt = self.entity_text(eid)
+                arr = _unit(np.asarray(vec, dtype=np.float32))
+                self.store.conn.execute(
+                    "INSERT INTO embedding(entity_id, model, dim, text_sha256, vector, updated_at)"
+                    " VALUES (?,?,?,?,?,?) ON CONFLICT(entity_id, model) DO UPDATE SET"
+                    " dim=excluded.dim, text_sha256=excluded.text_sha256, vector=excluded.vector,"
+                    " updated_at=excluded.updated_at",
+                    (eid, self.model, int(arr.size), hashlib.sha256(txt.encode("utf-8")).hexdigest(),
+                     arr.tobytes(), now_iso()))
+
     # ----------------------------------------------------------------- busca
     def search(self, query: str, k: int = 10, min_score: float = 0.2) -> list[SemanticHit]:
         query = query.strip()
-        if not query:
+        if not query or not self.indexed_count():
             return []
+        return self.search_vector(self.embed([query])[0], k, min_score)
+
+    def search_vector(self, vector: list[float], k: int = 10, min_score: float = 0.2) -> list[SemanticHit]:
         rows = self.store._all(
             "SELECT v.entity_id, v.dim, v.vector, e.display_name, t.label AS type_label FROM embedding v"
             " JOIN entity e ON e.id=v.entity_id JOIN entity_type t ON t.id=e.type_id"
             " WHERE v.model=? AND e.record_status='active'", (self.model,))
         if not rows:
             return []
-        q = _unit(np.asarray(self.embed([query])[0], dtype=np.float32))
+        q = _unit(np.asarray(vector, dtype=np.float32))
         rows = [r for r in rows if r["dim"] == q.size]
         if not rows:
             return []

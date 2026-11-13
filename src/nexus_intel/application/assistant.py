@@ -56,7 +56,18 @@ SCREENS = {
 }
 
 CITE = re.compile(r"\[(e|c|r|f|n):([0-9A-HJKMNP-TV-Z]{26})\]")
-ULID = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}")
+ULID = re.compile(r"(?<![0-9A-Za-z])[0-9A-HJKMNP-TV-Z]{26}(?![0-9A-Za-z])")
+
+
+def _sentence(s: str) -> str:
+    """Fecha a frase com ponto, sem duplicar ("… Ltda." não vira "… Ltda..")."""
+    return s if s.endswith((".", "!", "?")) else s + "."
+
+
+def id_of(ref: Any) -> str:
+    """Extrai o ID de "ID", "[f:ID]", "f:ID" ou "id=ID" (modelos pequenos variam o formato)."""
+    m = ULID.search(str(ref or ""))
+    return m.group(0) if m else str(ref or "").strip()
 _KIND_NAMES = {"e": "entidade", "c": "afirmação", "r": "relação", "f": "fonte", "n": "nota"}
 
 
@@ -193,10 +204,8 @@ class ToolBox:
     def _active_entity(self, ref: str) -> dict[str, Any]:
         """Aceita o ID ou, para tolerar modelos pequenos, o nome (ou a marca [e:ID])."""
         ref = str(ref or "").strip()
-        m = CITE.fullmatch(ref)
-        if m:
-            ref = m.group(2)
-        row = self.store._one("SELECT id FROM entity WHERE id=?", (ref,)) if ULID.fullmatch(ref) else None
+        m = ULID.search(ref)  # aceita "ID", "[e:ID]", "e:ID", "id=ID"
+        row = self.store._one("SELECT id FROM entity WHERE id=?", (m.group(0),)) if m else None
         if row is None:
             row = self._resolve_name(ref)
         e = self.store.get_entity(row["id"])
@@ -371,7 +380,7 @@ class ToolBox:
         return {"saltos": len(steps), "caminho": steps}
 
     def t_ver_fonte(self, fonte_id: str = "") -> dict[str, Any]:
-        s = self.store.get_source(str(fonte_id).strip())
+        s = self.store.get_source(id_of(fonte_id))
         uses = self.store.source_usages(s["id"])[:30]
         return {"cite": self._see("f", s["id"], s["title"]), "titulo": s["title"], "tipo": s["kind"],
                 "url": s["url"], "autor": s["author"], "publicada_em": s["published_at"],
@@ -421,12 +430,12 @@ class ToolBox:
     # ------------------------------------------------------------- navegação
     def t_abrir_entidade(self, entidade_id: str = "") -> dict[str, Any]:
         e = self._active_entity(entidade_id)
-        self.actions.append(UiAction("open_entity", e["id"], f"Abri a ficha de {e['display_name']}."))
+        self.actions.append(UiAction("open_entity", e["id"], _sentence(f"Abri a ficha de {e['display_name']}")))
         return {"ok": True, "aberta": e["display_name"]}
 
     def t_mostrar_no_grafo(self, entidade_id: str = "") -> dict[str, Any]:
         e = self._active_entity(entidade_id)
-        self.actions.append(UiAction("graph_focus", e["id"], f"Grafo focado em {e['display_name']}."))
+        self.actions.append(UiAction("graph_focus", e["id"], _sentence(f"Grafo focado em {e['display_name']}")))
         return {"ok": True}
 
     def t_abrir_tela(self, tela: str = "") -> dict[str, Any]:
@@ -455,12 +464,12 @@ class ToolBox:
         return self._propose("relation", {"source_entity_id": self._active_entity(origem_id)["id"],
                                           "type_key": tipo_relacao,
                                           "target_entity_id": self._active_entity(destino_id)["id"], "description": descricao,
-                                          "source_id": fonte_id, "excerpt": trecho}, justificativa)
+                                          "source_id": id_of(fonte_id), "excerpt": trecho}, justificativa)
 
     def t_sugerir_afirmacao(self, entidade_id: str = "", campo: str = "", valor: str = "", fonte_id: str = "",
                             trecho: str = "", justificativa: str = "") -> dict[str, Any]:
         return self._propose("claim", {"entity_id": self._active_entity(entidade_id)["id"], "field_key": campo, "value": valor,
-                                       "source_id": fonte_id, "excerpt": trecho}, justificativa)
+                                       "source_id": id_of(fonte_id), "excerpt": trecho}, justificativa)
 
     def t_sugerir_nota(self, titulo: str = "", texto: str = "", entidade_id: str = "") -> dict[str, Any]:
         eid = self._active_entity(entidade_id)["id"] if str(entidade_id or "").strip() else ""
@@ -698,7 +707,7 @@ def quick_command(store: ProjectStore, text: str) -> AssistantReply | None:
         except NexusError:
             return None
         box.t_mostrar_no_grafo(e["id"])
-        return _quick_reply(f"Mostrando {e['display_name']} no grafo.", box)
+        return _quick_reply(_sentence(f"Mostrando {e['display_name']} no grafo"), box)
     m = _CMD_ENTITY.match(t)
     if m:
         try:
@@ -706,7 +715,7 @@ def quick_command(store: ProjectStore, text: str) -> AssistantReply | None:
         except NexusError:
             return None
         box.t_abrir_entidade(e["id"])
-        return _quick_reply(f"Abrindo a ficha de {e['display_name']}.", box)
+        return _quick_reply(_sentence(f"Abrindo a ficha de {e['display_name']}"), box)
     m = _CMD_SCREEN.match(t)
     if m and m.group("x").strip() in _SCREEN_WORDS:
         key = _SCREEN_WORDS[m.group("x").strip()]

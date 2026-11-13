@@ -301,3 +301,10 @@ def test_parse_message_reads_tool_calls_in_any_format():
     assert tagged.content == ""
     broken = parse_message({"content": "<tool_call>{nada}</tool_call> Olá"})
     assert broken.tool_calls == [] and "<tool_call>" not in broken.content
+
+
+def test_ids_in_loose_formats_are_accepted(case):
+    box = ToolBox(case["store"])
+    for ref in (f"e:{case['helena']}", f"id={case['helena']}", f" [e:{case['helena']}] "):
+        assert json.loads(box.run("ver_entidade", {"entidade_id": ref}))["id"] == case["helena"]
+    assert json.loads(box.run("ver_fonte", {"fonte_id": f"f:{case['src']}"}))["titulo"].startswith("Junta")

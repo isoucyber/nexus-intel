@@ -40,6 +40,11 @@ class AppPaths:
     def profiles_index(self) -> Path:
         return self.data / "profiles.json"
 
+    @property
+    def voice(self) -> Path:
+        """Vozes e modelos de fala (`tools/baixar_voz.py`). Compartilhados entre perfis: não são dados pessoais."""
+        return self.data / "voz"
+
     def for_profile(self, profile_id: str) -> AppPaths:
         """Pastas privadas de um perfil: cofre, banco e projetos ficam em profiles/<id>/."""
         return AppPaths(self.profiles_root / profile_id, self.config, self.logs)
