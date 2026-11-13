@@ -7,6 +7,7 @@ modelos do NEXUS (`tools/baixar_voz.py`). O NEXUS abre o modelo só da pasta loc
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -42,14 +43,17 @@ class Transcriber:
         self.model_dir = model_dir
         self.threads = threads
         self._model: Any = None
+        self._lock = threading.Lock()
 
     def _load(self) -> Any:
-        if self._model is None:
-            from faster_whisper import WhisperModel
+        """Carrega o modelo (uma vez). Pode ser chamado em segundo plano ao abrir a tela."""
+        with self._lock:
+            if self._model is None:
+                from faster_whisper import WhisperModel
 
-            self._model = WhisperModel(str(self.model_dir), device="cpu", compute_type="int8",
-                                       cpu_threads=self.threads, local_files_only=True)
-        return self._model
+                self._model = WhisperModel(str(self.model_dir), device="cpu", compute_type="int8",
+                                           cpu_threads=self.threads, local_files_only=True)
+            return self._model
 
     def transcribe(self, audio: np.ndarray, language: str = "pt") -> str:
         """`audio`: float32 mono a 16 kHz."""

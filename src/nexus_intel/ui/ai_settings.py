@@ -13,8 +13,9 @@ from nexus_intel.infrastructure.voice import stt, tts
 from nexus_intel.ui.ai_common import AiPrefs, pick_chat_model, pick_embed_model, run_async
 from nexus_intel.ui.design.components import Button, Input, Select, dialog_form, notify, text
 
-ENGINES = [("Automático (Piper, senão a voz do Windows)", "auto"), ("Piper — voz neural", "piper"),
-           ("Voz do Windows", "windows"), ("espeak-ng (Linux)", "espeak"), ("Desligada", "off")]
+ENGINES = [("Automático (Kokoro, senão Piper, senão Windows)", "auto"), ("Kokoro — voz humana", "kokoro"),
+           ("Piper — voz neural leve", "piper"), ("Voz do Windows (robótica)", "windows"),
+           ("espeak-ng (Linux)", "espeak"), ("Desligada", "off")]
 
 
 def _editable_combo(current: str) -> QComboBox:
@@ -67,11 +68,13 @@ class AiSettingsDialog(QDialog):
         v = prefs.voice
         self.engine = Select(ENGINES, v.engine)
         form.addRow("Mecanismo de voz", self.engine)
+        self.kokoro_voice = Select([(label, key) for key, label in tts.KOKORO_VOICES.items()], v.kokoro_voice)
+        form.addRow("Voz Kokoro", self.kokoro_voice)
         voices = tts.installed_voices(prefs.voices_dir) or [v.voice]
-        self.voice = Select([(f"{n}{' (masculina, padrão)' if n == tts.DEFAULT_VOICE else ''}", n) for n in voices],
+        self.voice = Select([(f"{n}{' (masculina)' if n == tts.DEFAULT_VOICE else ''}", n) for n in voices],
                             v.voice)
-        form.addRow("Voz", self.voice)
-        self.timbre = QCheckBox("Timbre de assistente digital (mais grave, leve brilho metálico)")
+        form.addRow("Voz Piper", self.voice)
+        self.timbre = QCheckBox("Efeito de assistente digital (voz mais grave e metálica; menos natural)")
         self.timbre.setChecked(v.timbre)
         form.addRow("", self.timbre)
         self.deepen = _slider(85, 100, int(round(v.deepen * 100)))
@@ -94,8 +97,8 @@ class AiSettingsDialog(QDialog):
         form.addRow("", test)
         ok_stt, why = stt.describe(prefs.whisper_dir)
         form.addRow("Microfone", text(("✓ " if ok_stt else "") + why, "caption", wrap=True))
-        form.addRow("", text(f"Vozes e modelo de fala ficam em {prefs.root}. Para instalar: "
-                             "python tools/baixar_voz.py --instalar-piper", "caption", wrap=True))
+        form.addRow("", text(f"Vozes e modelo de fala ficam em {prefs.root}. Para instalar a voz humana e o "
+                             "microfone: python tools/baixar_voz.py", "caption", wrap=True))
 
         foot = QHBoxLayout()
         foot.addStretch(1)
@@ -103,7 +106,7 @@ class AiSettingsDialog(QDialog):
         self.save_btn = Button("Salvar", "primary", on_click=self.accept)
         foot.addWidget(self.save_btn)
         form.addRow(foot)
-        for w in (self.engine, self.voice):
+        for w in (self.engine, self.voice, self.kokoro_voice):
             w.currentIndexChanged.connect(self._update_voice_status)
         self.timbre.toggled.connect(self._update_voice_status)
         self.piper.textChanged.connect(self._update_voice_status)
@@ -119,6 +122,7 @@ class AiSettingsDialog(QDialog):
         p.auto_speak = self.auto_speak.isChecked()
         p.voice.engine = self.engine.value()
         p.voice.voice = self.voice.value() or p.voice.voice
+        p.voice.kokoro_voice = self.kokoro_voice.value() or p.voice.kokoro_voice
         p.voice.timbre = self.timbre.isChecked()
         p.voice.deepen = self.deepen.value() / 100
         p.voice.speed = self.speed.value() / 100

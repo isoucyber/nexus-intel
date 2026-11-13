@@ -39,13 +39,32 @@ reaproveitam esta base.
 - As leituras do banco rodam na thread da interface (dona da conexão); só a chamada HTTP roda
   em segundo plano. A conversa é um gerador (`Assistant.turn`), conduzido pela tela ou, nos
   testes, por `run_turn`.
-- Modelos pequenos inventam identificadores: o app entrega prontos os IDs das entidades citadas
-  na pergunta, e as ferramentas aceitam o nome no lugar do ID.
+- Modelos pequenos inventam identificadores: o app entrega prontas as marcas das entidades citadas
+  na pergunta, e as ferramentas aceitam a marca ou o nome no lugar do ID.
+
+### 2.2.1 Velocidade (revisão de 13/11, após o primeiro teste do usuário)
+
+Medição num processador de 4 núcleos, sem placa de vídeo, Qwen 2.5 3B: o modelo **lê** ~80 tokens/s
+e **escreve** ~7 tokens/s. O gargalo era o volume de texto, não o raciocínio. A primeira versão
+levava 58 s até a primeira palavra; a revisão, **3,8 s** (mesma máquina, mesmo modelo).
+
+| Medida | Efeito |
+|---|---|
+| Ollama pela API nativa, `keep_alive` de 30 min e contexto de 8 mil tokens | o modelo não é recarregado a cada pergunta nem corta as instruções |
+| Aquecimento ao abrir a tela (mesmas instruções e ferramentas de uma pergunta comum) | o servidor guarda esse início em cache; a pergunta só processa o que mudou |
+| Fichas das entidades citadas (e o caminho entre duas) já na pergunta, em texto compacto | a maioria das perguntas responde numa única rodada |
+| Ferramentas de sugestão só quando o pedido é uma ordem de mudança | instruções menores, iguais às do aquecimento (cache aproveitado) |
+| Marcas de citação curtas (`[c3]`) no lugar do ID completo | ~3 tokens por citação em vez de ~20; menos erro de cópia |
+| Resposta em fluxo; a voz começa na primeira frase completa | o usuário vê e ouve a resposta enquanto ela é gerada |
+| Voz e reconhecimento de fala pré-carregados ao abrir a tela | sem espera de carregamento na primeira fala |
+
+Uma pergunta só de leitura nem recebe as ferramentas de sugestão; se o modelo tentar usá-las
+(por exemplo, enganado por um texto nos dados), a chamada é recusada.
 
 ### 2.3 Citações conferidas e classificação
 
-- As ferramentas devolvem marcas prontas: `[c:ID]` afirmação, `[r:ID]` relação, `[f:ID]` fonte,
-  `[e:ID]` entidade, `[n:ID]` nota.
+- As ferramentas devolvem marcas prontas e curtas: `[c3]` afirmação, `[r2]` relação, `[f1]` fonte,
+  `[e1]` entidade, `[n1]` nota. O NEXUS guarda a correspondência marca → ID real.
 - Uma marca só vale se **existe no projeto e foi devolvida por uma ferramenta nesta conversa**.
   Marca inventada (mesmo de ID real não lido) é removida e contada na resposta.
 - Cada frase recebe um selo (`CitationBadge`, seção 8.4):
@@ -80,24 +99,29 @@ reaproveitam esta base.
 
 ### 2.6 Voz
 
-- **Síntese (texto → voz):**
-  1. **Piper** (voz neural) como **programa separado**: o NEXUS (Apache-2.0) não embute o Piper
-     nem o espeak-ng (GPL-3.0). Voz padrão **`pt_BR-cadu-medium`**, escolhida por medição:
-     frequência fundamental mediana de 137 Hz, faixa masculina (jeff: 151 Hz; faber: 172 Hz).
-     Dados das vozes: CC0.
-  2. **Voz do Windows** (SAPI via PowerShell), preferindo voz masculina pt-BR; sem instalação.
-  3. espeak-ng (Linux, desenvolvimento).
-- **Timbre de "assistente digital"** (opcional, ligado por padrão): voz um pouco mais grave
-  (síntese mais rápida + estiramento, mantendo a duração; padrão −6%, cerca de 1 semitom), dois
-  ecos curtos (brilho metálico), sala pequena e presença. **Não imita a voz de nenhuma pessoa
-  real**: clonar a voz de um ator ou personagem sem autorização não é aceitável.
+- **Síntese (texto → voz)**, revista em 13/11 depois que o usuário achou a voz robótica:
+  1. **Kokoro** (padrão): modelo Kokoro-82M (Apache-2.0), voz masculina **`pm_alex`** (133 Hz;
+     alternativas `pm_santa` e `pf_dora`). Comparação objetiva, sintetizando a mesma frase e passando
+     pelo reconhecimento de fala: Kokoro devolveu todas as palavras; Piper cadu errou nomes
+     ("Verte Simportações"). Roda como **processo separado e persistente** no ambiente Python próprio
+     (`kokoro-onnx` e espeak-ng, GPL, fora do NEXUS): carrega uma vez (~1 s) e sintetiza ~4x mais rápido
+     que o tempo de fala. O texto é dividido em trechos; o primeiro toca enquanto os seguintes são gerados.
+  2. **Piper** (`pt_BR-cadu-medium`, 137 Hz, CC0): alternativa leve, também em processo separado.
+  3. **Voz do Windows** (SAPI): sem instalação, mas robótica; a tela avisa.
+  4. espeak-ng (Linux, desenvolvimento).
+- **Causa da voz robótica na primeira versão:** o Piper instalado pelo script em `voz/piper-venv` não
+  era encontrado, e o app caía na voz do Windows; além disso, o efeito "assistente digital" vinha
+  ligado. Corrigido: o app procura nos ambientes do script, e o efeito vem **desligado** (preferências
+  antigas são migradas).
+- **Efeito de assistente digital** (opcional): voz um pouco mais grave e com ecos curtos. **Não imita
+  a voz de nenhuma pessoa real**: clonar a voz de um ator ou personagem sem autorização não é aceitável.
 - **Reconhecimento (voz → texto):** `faster-whisper` (MIT) com Whisper *small* (MIT), aberto só
   da pasta local (`local_files_only`).
 - **Microfone só sob comando:** botão ou Ctrl+Shift+Espaço; sem palavra de ativação e sem escuta
   contínua. O áudio fica só na memória; nada é gravado em disco.
 - O texto falado vai ao mecanismo de voz pela **entrada padrão**, nunca na linha de comando.
-- `tools/baixar_voz.py` baixa vozes e modelo de huggingface.co numa **revisão fixa**, confere o
-  **SHA-256** de cada arquivo e cria um ambiente separado para o Piper (`--instalar-piper`).
+- `tools/baixar_voz.py` baixa o Kokoro, o Whisper e (com `--piper`) o Piper de huggingface.co numa
+  **revisão fixa**, confere o **SHA-256** de cada arquivo e cria os ambientes Python separados.
 - Dependências de voz são opcionais (`pip install "nexus-intel[voz]"`).
 
 ## 3. Consequências

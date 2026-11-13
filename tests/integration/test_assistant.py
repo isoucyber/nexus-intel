@@ -78,18 +78,21 @@ def test_read_tools_give_citable_marks_and_skip_private_and_sensitive(case):
     box = ToolBox(st)
     out = box.run("ver_entidade", {"entidade_id": case["helena"]})
     assert "SEGREDO-PRIVADO" not in out and "Diabetes" not in out
-    data = json.loads(out)
+    data = box.t_ver_entidade(case["helena"])
     marks = {a["cite"] for a in data["afirmacoes"]}
-    assert f"[c:{case['prof']}]" in marks and f"[c:{case['rumor']}]" in marks
-    assert f"c:{case['prof']}" in box.seen and box.seen[f"c:{case['prof']}"].documented
-    assert not box.seen[f"c:{case['rumor']}"].documented
+    prof, rumor = box.mark("c", case["prof"]), box.mark("c", case["rumor"])
+    assert prof in marks and rumor in marks and len(prof) <= 5  # marca curta, ex.: [c1]
+    assert box.seen[prof[1:-1]].documented and box.seen[prof[1:-1]].id == case["prof"]
+    assert not box.seen[rumor[1:-1]].documented
     assert ToolBox(st, include_sensitive=True).run("ver_entidade", {"entidade_id": case["helena"]}).count("Diabetes") == 1
+    assert prof in out and "Junta comercial" in out and case["prof"] not in out  # sem IDs longos  # ficha em texto compacto, com as marcas
 
 
 def test_entity_can_be_referenced_by_name_or_mark(case):
     box = ToolBox(case["store"])
-    assert json.loads(box.run("ver_entidade", {"entidade_id": "helena prado"}))["id"] == case["helena"]
-    assert json.loads(box.run("ver_entidade", {"entidade_id": f"[e:{case['helena']}]"}))["id"] == case["helena"]
+    assert box.run("ver_entidade", {"entidade_id": "helena prado"}).startswith("Helena Prado (Pessoa) [e1]")
+    assert box.t_ver_entidade("[e1]")["id"] == case["helena"] and box.t_ver_entidade("e1")["id"] == case["helena"]
+    assert box.t_ver_entidade(case["helena"])["id"] == case["helena"]
     assert "erro" in json.loads(box.run("ver_entidade", {"entidade_id": "P001"}))
 
 
@@ -97,7 +100,7 @@ def test_path_between_entities(case):
     box = ToolBox(case["store"])
     res = json.loads(box.run("caminho_entre", {"origem_id": case["helena"], "destino_id": case["vertice"]}))
     assert res["saltos"] == 2
-    assert [s["cite"] for s in res["caminho"]] == [f"[r:{case['works']}]", f"[r:{case['partner']}]"]
+    assert [s["cite"] for s in res["caminho"]] == [box.mark("r", case["works"]), box.mark("r", case["partner"])]
 
 
 def test_unknown_tool_and_bad_arguments_are_reported_not_raised(case):
@@ -115,25 +118,28 @@ def test_mentioned_entities_are_found_in_question(case):
 # ------------------------------------------------------------------ citações
 def test_turn_verifies_citations_and_classifies(case):
     st = case["store"]
-    fake = "01ARZ3NDEKTSV4RRFFQ69G5FAV"  # marca bem formada, mas inexistente
-    final = (f"Helena Prado é contadora [c:{case['prof']}]. "
-             f"Ela teria nacionalidade italiana [c:{case['rumor']}]. "
-             f"Ela também é dona de um iate [c:{fake}]. "
-             "Interpreto que ela tem papel central no caso.")
-    chat = scripted(tool("ver_entidade", entidade_id=case["helena"]), ChatMessage(final))
-    reply = run_turn(Assistant(st, model="teste").turn("Quem é Helena Prado?"), chat)
+    fake = "[c99]"  # marca bem formada, mas nunca entregue ao modelo
+    a = Assistant(st, model="teste")
+
+    def final(_req):
+        return ChatMessage(f"Helena Prado é contadora {a.mark('c', case['prof'])}. "
+                           f"Ela teria nacionalidade italiana {a.mark('c', case['rumor'])}. "
+                           f"Ela também é dona de um iate {fake}. "
+                           "Interpreto que ela tem papel central no caso.")
+    chat = scripted(tool("ver_entidade", entidade_id=case["helena"]), final)
+    reply = run_turn(a.turn("Quem é ela?"), chat)
     kinds = [(s.kind, s.text) for s in reply.segments]
     assert kinds[0][0] == "documented"
     assert kinds[1][0] == "unverified"  # citação real, mas a afirmação não tem fonte
     assert kinds[2][0] == "unverified" and fake not in kinds[2][1]  # marca inventada removida
     assert kinds[3][0] == "interpretation"
     assert reply.removed_citations == 1
-    assert fake not in reply.spoken_text() and "[c:" not in reply.spoken_text()
+    assert fake not in reply.spoken_text() and "[c" not in reply.spoken_text()
 
 
 def test_citation_of_existing_id_not_seen_in_conversation_is_rejected(case):
     """Existir no banco não basta: a IA precisa ter lido o item por uma ferramenta."""
-    chat = scripted(ChatMessage(f"A relação existe [r:{case['works']}]."))
+    chat = scripted(ChatMessage("A relação existe [r1]."))
     reply = run_turn(Assistant(case["store"], model="t").turn("Algo?"), chat)
     assert reply.removed_citations == 1 and reply.segments[0].kind == "unverified"
 
@@ -149,8 +155,8 @@ def test_auto_attribution_only_when_fact_is_literally_in_sentence(case):
 
 
 def test_document_mode_and_malformed_marks_are_cleaned(case):
-    segs, removed = classify("Veja [p:01M796W6FS787VSEGG8JMHCPV1] e id=01M796W6FS787VSEGG8JMHCPV1 aqui.", {})
-    assert "[p:" not in segs[0].text and "id=" not in segs[0].text and removed == 1
+    segs, removed = classify("Veja [p:01M796W6FS787VSEGG8JMHCPV1], [p3] e id=01M796W6FS787VSEGG8JMHCPV1 aqui.", {})
+    assert "[p" not in segs[0].text and "id=" not in segs[0].text and removed == 2
 
 
 def test_prompt_injection_in_data_cannot_write(case):
@@ -165,7 +171,25 @@ def test_prompt_injection_in_data_cannot_write(case):
     after = {r["id"]: r["epistemic_status"] for r in st._all("SELECT id, epistemic_status FROM claim")}
     assert before == after
     assert st._one("SELECT count(*) AS n FROM relation WHERE source_id=?", (evil,))["n"] == 0
+    # pergunta de leitura: a ferramenta de sugestão nem é oferecida, e a chamada é recusada
+    assert reply.suggestions == [] and "indisponível" in chat.calls[-1].messages[-1]["content"]
+    assert all(t["function"]["name"] != "sugerir_relacao" for t in chat.calls[0].tools)
+    # quando o usuário pede uma mudança, o máximo que a IA faz é uma sugestão pendente
+    chat = scripted(tool("sugerir_relacao", origem_id=evil, tipo_relacao="knows", destino_id=case["helena"]),
+                    ChatMessage("Sugestão registrada."))
+    reply = run_turn(Assistant(st, model="t").turn("Liga essa entidade à Helena"), chat)
     assert len(reply.suggestions) == 1 and SuggestionBox(st).get(reply.suggestions[0]).status == "pending"
+    assert st._one("SELECT count(*) AS n FROM relation WHERE source_id=?", (evil,))["n"] == 0
+
+
+def test_mentioned_entities_are_preloaded_so_one_round_is_enough(case):
+    a = Assistant(case["store"], model="t")
+    chat = scripted(lambda req: ChatMessage(f"É contadora {a.mark('c', case['prof'])}."))
+    reply = run_turn(a.turn("Quem é Helena Prado?"), chat)
+    assert len(chat.calls) == 1 and "Dados do projeto já consultados" in chat.calls[0].messages[-1]["content"]
+    assert reply.segments[0].kind == "documented"
+    tokens_read = len(chat.calls[0].messages[0]["content"]) + len(json.dumps(chat.calls[0].tools))
+    assert tokens_read < 4500  # instruções + ferramentas enxutas numa pergunta de leitura
 
 
 def test_tool_rounds_are_bounded(case):
@@ -306,5 +330,42 @@ def test_parse_message_reads_tool_calls_in_any_format():
 def test_ids_in_loose_formats_are_accepted(case):
     box = ToolBox(case["store"])
     for ref in (f"e:{case['helena']}", f"id={case['helena']}", f" [e:{case['helena']}] "):
-        assert json.loads(box.run("ver_entidade", {"entidade_id": ref}))["id"] == case["helena"]
+        assert box.t_ver_entidade(ref)["id"] == case["helena"]
     assert json.loads(box.run("ver_fonte", {"fonte_id": f"f:{case['src']}"}))["titulo"].startswith("Junta")
+
+
+def test_path_is_preloaded_when_two_entities_are_mentioned(case):
+    chat = scripted(ChatMessage("Sim."))
+    run_turn(Assistant(case["store"], model="t").turn("Há ligação entre Helena Prado e Vértice Importações S.A.?"), chat)
+    ctx = chat.calls[0].messages[-1]["content"]
+    assert "Caminho entre" in ctx and "trabalha em" in ctx and case["works"] not in ctx
+
+
+def test_marks_only_line_joins_previous_sentence(case):
+    box = ToolBox(case["store"])
+    box.t_ver_entidade(case["helena"])
+    segs, _ = classify(f"Ela é contadora.\n{box.mark('c', case['prof'])}", box.seen)
+    assert len(segs) == 1 and segs[0].kind == "documented" and segs[0].citations[0].id == case["prof"]
+
+
+
+@pytest.mark.parametrize("q,change", [
+    ("Quem é Helena Prado e com quem ela se relaciona?", False),
+    ("Existe ligação entre Helena e a Aurora?", False),
+    ("Quais sugestões estão pendentes?", False),
+    ("Liga a Helena à Aurora", True),
+    ("crie uma pessoa chamada Bruno", True),
+    ("anote que ela viajou em 2020", True),
+])
+def test_change_tools_only_for_change_requests(q, change):
+    from nexus_intel.application.assistant import PROPOSAL_TOOLS, tools_for
+
+    names = {t["function"]["name"] for t in tools_for(q)}
+    assert bool(names & PROPOSAL_TOOLS) is change
+
+
+def test_warmup_matches_a_plain_question_so_the_server_cache_is_reused(case):
+    a = Assistant(case["store"], model="t")
+    w = a.warmup_request()
+    r = next(a.turn("Quem é Helena Prado e com quem ela se relaciona?"))
+    assert w.messages[0] == r.messages[0] and w.tools == r.tools

@@ -69,9 +69,9 @@ Vértice?”, “abre a ficha da Helena”, “mostra a Aurora no grafo”, “l
 - **Nada entra no projeto sem você:** quando a IA quer criar ou ligar algo, ela registra uma
   sugestão em **Sugestões e aprovações**; aprovar ou rejeitar fica na auditoria.
 - **Busca semântica:** encontra pelo significado (“empresas de transporte”).
-- **Voz:** responde em voz alta com voz masculina neural (Piper, voz *cadu*) e um timbre opcional
-  de “assistente digital”; ouve pelo microfone só quando você manda (botão ou Ctrl+Shift+Espaço).
-  Sem o Piper, usa a voz do Windows.
+- **Voz humana:** responde em voz alta com a voz neural masculina **Kokoro (Alex)**, que começa a
+  falar já na primeira frase; ouve pelo microfone só quando você manda (botão ou Ctrl+Shift+Espaço).
+  Alternativas: Piper (mais leve) ou a voz do Windows (robótica).
 
 ### Como ligar
 
@@ -80,14 +80,16 @@ Vértice?”, “abre a ficha da Helena”, “mostra a Aurora no grafo”, “l
    ollama pull qwen2.5:7b
    ollama pull bge-m3
    ```
-   Em computadores modestos, use `qwen2.5:3b`. LM Studio e llama.cpp também funcionam
-   (IA e análises → Configurar → Endereço).
+   **Sem placa de vídeo, prefira `qwen2.5:3b`**: responde cerca de 2 vezes mais rápido que o 7b.
+   Com placa de vídeo (NVIDIA ou AMD), o Ollama a usa sozinho e o 7b responde em 1–2 s.
+   LM Studio e llama.cpp também funcionam (IA e análises → Configurar → Endereço).
 2. Voz e microfone (opcional, rodando a partir do código):
    ```powershell
    pip install -e ".[voz]"
-   python tools/baixar_voz.py --instalar-piper
+   python tools/baixar_voz.py
    ```
-   O script baixa a voz e o modelo de fala numa versão fixa e confere o SHA-256 de cada arquivo.
+   O script baixa a voz Kokoro e o modelo de fala (~800 MB) numa versão fixa, confere o SHA-256 de
+   cada arquivo e cria um ambiente separado para a voz. `--piper` instala também a voz Piper.
 3. No projeto: **Inteligência → IA e análises** (Ctrl+J).
 
 Só endereços deste computador são aceitos para a IA; observações privadas nunca vão para ela;

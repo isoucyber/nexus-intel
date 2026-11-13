@@ -12,6 +12,8 @@ SRC = ROOT / "src" / "nexus_intel"
 datas = [
     (str(SRC / "infrastructure" / "db" / "migrations"), "nexus_intel/infrastructure/db/migrations"),
     (str(SRC / "ui" / "assets"), "nexus_intel/ui/assets"),
+    # Processo de voz Kokoro: executado pelo Python do ambiente separado, precisa existir como arquivo.
+    (str(SRC / "infrastructure" / "voice" / "kokoro_worker.py"), "nexus_intel/infrastructure/voice"),
     (str(ROOT / "LICENSE"), "."),
     (str(ROOT / "THIRD_PARTY_LICENSES.md"), "."),
 ]

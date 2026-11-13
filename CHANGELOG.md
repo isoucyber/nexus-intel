@@ -6,7 +6,7 @@ Formato baseado em Keep a Changelog; versões seguem SemVer.
 ### Adicionado
 - Assistente de IA local (ADR-0004): cliente compatível com OpenAI para Ollama, LM Studio e llama.cpp,
   restrito a endereços deste computador; ferramentas só de leitura (buscar, ficha, caminho entre entidades,
-  fontes, qualidade, notas); citações conferidas (`[c:]`, `[r:]`, `[f:]`, `[e:]`, `[n:]`) com remoção das
+  fontes, qualidade, notas); citações conferidas (marcas curtas `[c3]`, `[r2]`, `[f1]`, `[e1]`, `[n1]`) com remoção das
   inventadas; selo por frase (Documentado, Interpretação da IA, Não verificado); atribuição conferida.
 - Comandos de navegação por texto ou voz, inclusive sem IA ("abre a ficha da …", "mostra … no grafo").
 - Sugestões e aprovações: tabela `suggestion` (migração `0003_ia`), aprovação na mesma transação que aplica,
@@ -16,6 +16,17 @@ Formato baseado em Keep a Changelog; versões seguem SemVer.
   voz do Windows como alternativa; microfone sob comando e reconhecimento local (faster-whisper);
   `tools/baixar_voz.py` com revisão fixa e SHA-256. Extra opcional `[voz]`.
 - Atalhos Ctrl+J (assistente) e Ctrl+Shift+Espaço (falar). Contador de sugestões pendentes no menu.
+- Voz humana **Kokoro** (`pm_alex`, masculina) como padrão, em processo persistente; fala em trechos
+  enquanto a resposta chega. Piper vira alternativa (`--piper`).
+- Velocidade: Ollama nativo com `keep_alive` e contexto de 8 mil tokens; aquecimento ao abrir a tela;
+  fichas e caminho das entidades citadas já na pergunta; marcas de citação curtas (`[c3]`); ferramentas
+  de sugestão só em ordens de mudança; resposta em fluxo; tempo de cada resposta na tela.
+  Medição (4 núcleos, sem placa de vídeo, 3B): primeira palavra de 58 s para 3,8 s.
+### Corrigido
+- Voz robótica: o Piper instalado pelo script não era encontrado (caía na voz do Windows) e o efeito
+  metálico vinha ligado por padrão; preferências antigas são migradas.
+- Pergunta com "relaciona" era tratada como pedido de mudança.
+- Divisão da fala em trechos sobrescrevia o primeiro trecho em alguns textos.
 - Modelo de ameaças: adendo sobre IA e voz (cenários 11–17).
 
 ## [0.3.4] — 2026-11-10

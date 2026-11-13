@@ -14,6 +14,7 @@ class FakeClient:
 
     script: list = []
     available = True
+    warmups = 0
 
     def __init__(self, base_url: str = "") -> None:
         self.base_url = base_url
@@ -23,9 +24,19 @@ class FakeClient:
             return EngineStatus(False, "http://127.0.0.1:11434", True, detail="O mecanismo de IA local não respondeu.")
         return EngineStatus(True, "http://127.0.0.1:11434", True, "Ollama", ["bge-m3", "qwen2.5:7b"])
 
-    def chat(self, model, messages, tools=None, temperature=0.2):
+    def chat(self, model, messages, tools=None, temperature=0.2, *, on_text=None, max_tokens=None):
+        if max_tokens == 1:  # aquecimento
+            FakeClient.warmups += 1
+            return ChatMessage("")
         step = FakeClient.script.pop(0)
-        return step(messages) if callable(step) else step
+        msg = step(messages) if callable(step) else step
+        if on_text and msg.content:
+            for word in msg.content.split(" "):
+                on_text(word + " ")
+        return msg
+
+    def warmup(self, model, messages, tools=None):
+        self.chat(model, messages, tools, max_tokens=1)
 
     def embed(self, model, texts):
         vocab = ["contadora", "logística", "pessoa", "empresa"]
@@ -86,13 +97,14 @@ def test_answer_with_verified_citation_and_click_opens_entity(qtbot, ws, data):
     ready(qtbot, page)
     FakeClient.script = [
         ChatMessage("", [ToolCall("1", "ver_entidade", {"entidade_id": data["helena"]})]),
-        ChatMessage(f"Helena Prado é contadora [c:{data['prof']}]. Interpreto que <b>ela</b> é central."),
+        lambda msgs: ChatMessage(f"Helena Prado é contadora {page.assistant.mark('c', data['prof'])}. "
+                                 "Interpreto que <b>ela</b> é central."),
     ]
     page.ask("Quem é Helena Prado?")
     qtbot.waitUntil(lambda: not page.busy and "Documentado" in texts(page), timeout=5000)
     shown = texts(page)
     assert "Interpretação da IA" in shown and "<b>ela</b>" in shown  # HTML do modelo: texto puro
-    assert f"[c:{data['prof']}]" not in shown  # a marca vira botão
+    assert page.assistant.mark("c", data["prof"]) not in shown  # a marca vira botão
     from nexus_intel.ui.design.components import Button
 
     cite = [b for b in page.findChildren(Button) if b.toolTip().startswith("Abrir: Helena Prado")][0]
@@ -199,3 +211,23 @@ def test_lock_shutdown_silences_voice(ws, monkeypatch):
     monkeypatch.setattr(page.speaker, "stop", lambda: stopped.append(1))
     ws.shutdown()
     assert stopped
+
+
+def test_streamed_answer_is_spoken_sentence_by_sentence_and_model_is_warmed(qtbot, ws, data, monkeypatch):
+    page = ws.pages["ai"]
+    FakeClient.warmups = 0
+    ready(qtbot, page)
+    qtbot.waitUntil(lambda: FakeClient.warmups == 1, timeout=5000)  # aquecido ao abrir a tela
+    fed, finished = [], []
+    monkeypatch.setattr(page.speaker, "begin", lambda s: True)
+    monkeypatch.setattr(page.speaker, "feed", lambda t: fed.append(t))
+    monkeypatch.setattr(page.speaker, "finish", lambda: finished.append(1))
+    page.voice_toggle.setChecked(True)
+    FakeClient.script = [lambda msgs: ChatMessage(f"Helena é contadora {page.assistant.mark('c', data['prof'])}. "
+                                                  "Trabalha na Aurora. Mais algo?")]
+    page.ask("Quem é Helena Prado?")
+    qtbot.waitUntil(lambda: not page.busy, timeout=5000)
+    spoken = "".join(fed)
+    assert "Helena é contadora." in spoken and "[c" not in spoken and "Mais algo?" in spoken
+    assert finished == [1] and page._live is None
+    assert " s" in texts(page)  # tempo da resposta aparece no cartão

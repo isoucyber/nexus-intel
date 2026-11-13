@@ -22,8 +22,10 @@
 | sounddevice / PortAudio | MIT | Microfone e alto-falante (`pip install "nexus-intel[voz]"`) |
 | faster-whisper / CTranslate2 | MIT | Reconhecimento de fala local |
 | Whisper small (modelo, conversão Systran) | MIT | Modelo de reconhecimento de fala, baixado por `tools/baixar_voz.py` |
-| Vozes Piper pt_BR cadu e jeff | Dados CC0 | Vozes neurais, baixadas por `tools/baixar_voz.py` |
-| Piper (piper-tts) e espeak-ng | GPL-3.0 | **Programa separado**, instalado num ambiente próprio e executado como processo externo; o NEXUS não o embute nem o distribui |
+| Kokoro-82M (modelo ONNX, onnx-community) e vozes pm_alex, pm_santa, pf_dora | Apache-2.0 | Voz neural padrão, baixada por `tools/baixar_voz.py` |
+| kokoro-onnx, onnxruntime | MIT | Executam o Kokoro no **ambiente separado** (processo externo) |
+| Vozes Piper pt_BR cadu e jeff | Dados CC0 | Voz neural alternativa (`tools/baixar_voz.py --piper`) |
+| Piper (piper-tts) e espeak-ng (usado pelo Kokoro e pelo Piper) | GPL-3.0 | **Programas separados**, instalados em ambientes próprios e executados como processos externos; o NEXUS não os embute nem os distribui |
 | Ollama / LM Studio / llama.cpp | MIT / proprietária / MIT | Mecanismo de IA instalado pelo usuário; o NEXUS só conversa com ele por HTTP local |
 
 Os textos completos das licenças acompanham cada pacote dentro da pasta de instalação. Fontes e ícones: `nexus_intel/ui/assets/LICENSE-*.txt`.

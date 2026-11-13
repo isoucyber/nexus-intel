@@ -19,6 +19,7 @@ from nexus_intel.infrastructure.ai.client import DEFAULT_BASE_URL
 from nexus_intel.infrastructure.paths import default_paths
 from nexus_intel.infrastructure.voice.tts import VoiceSettings
 
+PREFS_VERSION = 2
 _CHAT_HINTS = ("qwen", "llama", "mistral", "gemma", "phi", "granite", "deepseek", "hermes", "command")
 _EMBED_HINTS = ("embed", "bge", "nomic", "e5", "minilm", "gte", "arctic")
 
@@ -32,11 +33,14 @@ class AiPrefs:
     auto_speak: bool = True
     voice: VoiceSettings = field(default_factory=VoiceSettings)
     voice_root: str = ""  # vazio = pasta de dados do NEXUS / voz
+    version: int = PREFS_VERSION
 
     @classmethod
     def from_dict(cls, d: dict[str, Any] | None) -> AiPrefs:
         d = dict(d or {})
         voice = VoiceSettings.from_dict(d.pop("voice", None))
+        if int(d.get("version", 1)) < 2:  # 0.4-dev: timbre metálico deixava a voz robótica
+            voice.timbre, voice.engine = False, "auto"
         known = {k: d[k] for k in ("base_url", "model", "embed_model", "include_sensitive", "auto_speak",
                                    "voice_root") if k in d}
         return cls(**known, voice=voice)
@@ -58,7 +62,7 @@ class AiPrefs:
 
     def voice_settings(self) -> VoiceSettings:
         v = VoiceSettings(**asdict(self.voice))
-        v.voice_dir = v.voice_dir or str(self.voices_dir)
+        v.root = str(self.root)
         return v
 
 

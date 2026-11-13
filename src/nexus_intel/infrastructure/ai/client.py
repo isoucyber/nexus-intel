@@ -20,6 +20,7 @@ import json
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
@@ -98,26 +99,32 @@ class EngineStatus:
     detail: str = ""
 
 
+TextCallback = Callable[[str], Any]
+KEEP_ALIVE = "30m"  # Ollama: mantém o modelo na memória (sem recarregar a cada pergunta)
+NUM_CTX = 8192  # Ollama: contexto suficiente para instruções + ferramentas + resultados
+
+
 class LocalLlmClient:
+    """Fala o protocolo compatível com OpenAI e, quando o servidor é o Ollama, a API nativa
+    (`/api/chat`), que permite manter o modelo carregado (`keep_alive`) e definir o contexto."""
+
     def __init__(self, base_url: str = DEFAULT_BASE_URL, *, allow_remote: bool = False,
-                 timeout: float = 180.0, api_key: str | None = None) -> None:
+                 timeout: float = 300.0, api_key: str | None = None) -> None:
         self.base_url = normalize_base_url(base_url, allow_remote)
         self.local = is_loopback(urlsplit(self.base_url).hostname or "")
         self.timeout = timeout
         self._api_key = api_key
+        self.native = False  # Ollama detectado em status()
 
     # ------------------------------------------------------------ transporte
-    def _request(self, method: str, path: str, body: dict[str, Any] | None = None,
-                 timeout: float | None = None) -> Any:
+    def _open(self, method: str, path: str, body: dict[str, Any] | None, timeout: float | None) -> Any:
         data = json.dumps(body).encode("utf-8") if body is not None else None
         req = urllib.request.Request(self.base_url + path, data=data, method=method)  # noqa: S310 - URL validada
         req.add_header("Content-Type", "application/json")
-        req.add_header("Accept", "application/json")
         if self._api_key:
             req.add_header("Authorization", f"Bearer {self._api_key}")
         try:
-            with _OPENER.open(req, timeout=timeout or self.timeout) as resp:
-                raw = resp.read(MAX_RESPONSE_BYTES + 1)
+            return _OPENER.open(req, timeout=timeout or self.timeout)
         except urllib.error.HTTPError as exc:
             detail = ""
             try:
@@ -127,12 +134,41 @@ class LocalLlmClient:
             raise AiUnavailable(f"O mecanismo de IA recusou o pedido (HTTP {exc.code}). {detail[:300]}") from exc
         except (urllib.error.URLError, OSError, TimeoutError) as exc:
             raise AiUnavailable() from exc
+
+    def _request(self, method: str, path: str, body: dict[str, Any] | None = None,
+                 timeout: float | None = None) -> Any:
+        try:
+            with self._open(method, path, body, timeout) as resp:
+                raw = resp.read(MAX_RESPONSE_BYTES + 1)
+        except (OSError, TimeoutError) as exc:
+            raise AiUnavailable() from exc
         if len(raw) > MAX_RESPONSE_BYTES:
             raise AiUnavailable("A resposta do mecanismo de IA é grande demais.")
         try:
             return json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise AiUnavailable("O mecanismo de IA devolveu uma resposta inválida.") from exc
+
+    def _lines(self, path: str, body: dict[str, Any]) -> Any:
+        """Lê uma resposta em fluxo, linha a linha (NDJSON do Ollama ou SSE do protocolo OpenAI)."""
+        total = 0
+        try:
+            with self._open("POST", path, body, None) as resp:
+                for raw in resp:
+                    total += len(raw)
+                    if total > MAX_RESPONSE_BYTES:
+                        raise AiUnavailable("A resposta do mecanismo de IA é grande demais.")
+                    line = raw.decode("utf-8", "replace").strip()
+                    if line.startswith("data:"):
+                        line = line[5:].strip()
+                    if not line or line == "[DONE]":
+                        continue
+                    try:
+                        yield json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+        except (OSError, TimeoutError) as exc:
+            raise AiUnavailable() from exc
 
     # ------------------------------------------------------------ consultas
     def status(self) -> EngineStatus:
@@ -146,24 +182,73 @@ class LocalLlmClient:
         st.models = sorted(str(m.get("id", "")) for m in models.get("data", []) if m.get("id"))
         try:
             self._request("GET", "/api/version", timeout=2)
-            st.kind = "Ollama"
+            st.kind, self.native = "Ollama", True
         except NexusError:
-            st.kind = "Servidor compatível"
+            st.kind, self.native = "Servidor compatível", False
         return st
 
     def chat(self, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
-             temperature: float = 0.2) -> ChatMessage:
+             temperature: float = 0.2, *, on_text: TextCallback | None = None,
+             max_tokens: int | None = None) -> ChatMessage:
+        """Uma rodada de conversa. Com `on_text`, a resposta chega em fluxo (o texto aparece
+        enquanto é gerado); trechos de chamada de ferramenta escrita no texto não são repassados."""
+        if self.native:
+            return self._chat_native(model, messages, tools, temperature, on_text, max_tokens)
         body: dict[str, Any] = {"model": model, "messages": messages, "temperature": temperature,
-                                "stream": False}
+                                "stream": on_text is not None}
+        if max_tokens:
+            body["max_tokens"] = max_tokens
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
-        resp = self._request("POST", "/v1/chat/completions", body)
-        try:
-            msg = resp["choices"][0]["message"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise AiUnavailable("O mecanismo de IA devolveu uma resposta sem mensagem.") from exc
+        if on_text is None:
+            resp = self._request("POST", "/v1/chat/completions", body)
+            try:
+                return parse_message(resp["choices"][0]["message"])
+            except (KeyError, IndexError, TypeError) as exc:
+                raise AiUnavailable("O mecanismo de IA devolveu uma resposta sem mensagem.") from exc
+        content, calls = _Gate(on_text), {}
+        for ev in self._lines("/v1/chat/completions", body):
+            delta = ((ev.get("choices") or [{}])[0] or {}).get("delta") or {}
+            if delta.get("content"):
+                content.add(str(delta["content"]))
+            for tc in delta.get("tool_calls") or []:
+                slot = calls.setdefault(int(tc.get("index", 0)), {"id": "", "name": "", "arguments": ""})
+                slot["id"] = tc.get("id") or slot["id"]
+                fn = tc.get("function") or {}
+                slot["name"] += fn.get("name") or ""
+                slot["arguments"] += fn.get("arguments") or ""
+        msg = {"content": content.text, "tool_calls": [
+            {"id": c["id"] or f"call_{i}", "function": {"name": c["name"], "arguments": c["arguments"]}}
+            for i, c in sorted(calls.items())]}
         return parse_message(msg)
+
+    def _chat_native(self, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None,
+                     temperature: float, on_text: TextCallback | None, max_tokens: int | None) -> ChatMessage:
+        options: dict[str, Any] = {"temperature": temperature, "num_ctx": NUM_CTX}
+        if max_tokens:
+            options["num_predict"] = max_tokens
+        body: dict[str, Any] = {"model": model, "messages": _to_native(messages), "stream": on_text is not None,
+                                "keep_alive": KEEP_ALIVE, "options": options}
+        if tools:
+            body["tools"] = tools
+        if on_text is None:
+            resp = self._request("POST", "/api/chat", body)
+            return parse_message(_from_native(resp.get("message") or {}))
+        content, calls = _Gate(on_text), []
+        for ev in self._lines("/api/chat", body):
+            m = ev.get("message") or {}
+            if m.get("content"):
+                content.add(str(m["content"]))
+            calls += m.get("tool_calls") or []
+            if ev.get("done"):
+                break
+        return parse_message(_from_native({"content": content.text, "tool_calls": calls}))
+
+    def warmup(self, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> None:
+        """Carrega o modelo e processa as instruções antes da primeira pergunta (o servidor guarda
+        esse começo em cache e as perguntas seguintes só processam o que mudou)."""
+        self.chat(model, messages, tools, max_tokens=1)
 
     def embed(self, model: str, texts: list[str]) -> list[list[float]]:
         resp = self._request("POST", "/v1/embeddings", {"model": model, "input": texts})
@@ -172,6 +257,48 @@ class LocalLlmClient:
             return [[float(x) for x in r["embedding"]] for r in rows]
         except (KeyError, TypeError, ValueError) as exc:
             raise AiUnavailable("O modelo de vetores devolveu uma resposta inválida.") from exc
+
+
+class _Gate:
+    """Junta o texto em fluxo e só repassa ao `on_text` o que não for chamada de ferramenta escrita."""
+
+    def __init__(self, on_text: TextCallback) -> None:
+        self.on_text, self.text, self._open = on_text, "", None
+
+    def add(self, piece: str) -> None:
+        self.text += piece
+        head = self.text.lstrip()
+        if self._open is None:
+            if len(head) < len("<tool_call>") and "<tool_call>".startswith(head):
+                return  # ainda não dá para saber
+            self._open = not head.startswith("<tool_call>")
+            if self._open:
+                self.on_text(self.text)
+            return
+        if self._open and "<tool_call>" not in self.text:
+            self.on_text(piece)
+
+
+def _to_native(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Mensagens no formato OpenAI → formato nativo do Ollama (argumentos como objeto)."""
+    out = []
+    for m in messages:
+        n: dict[str, Any] = {"role": m["role"], "content": m.get("content") or ""}
+        if m.get("tool_calls"):
+            n["tool_calls"] = [{"function": {"name": tc["function"]["name"],
+                                             "arguments": _args(tc["function"].get("arguments"))}}
+                               for tc in m["tool_calls"]]
+        if m["role"] == "tool" and m.get("name"):
+            n["tool_name"] = m["name"]
+        out.append(n)
+    return out
+
+
+def _from_native(m: dict[str, Any]) -> dict[str, Any]:
+    return {"content": m.get("content") or "", "tool_calls": [
+        {"id": f"call_{i}", "function": {"name": (tc.get("function") or {}).get("name", ""),
+                                         "arguments": (tc.get("function") or {}).get("arguments") or {}}}
+        for i, tc in enumerate(m.get("tool_calls") or [])]}
 
 
 _TOOL_TAG = re.compile(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|\Z)", re.S)

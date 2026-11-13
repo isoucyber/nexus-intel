@@ -11,6 +11,7 @@ Todo texto vindo do modelo ou do projeto é exibido como TEXTO PURO (nunca HTML)
 from __future__ import annotations
 
 import re
+import time
 from typing import Any
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -58,7 +59,8 @@ def display_text(s: str) -> str:
     """Texto do modelo para a tela: sem marcas de citação (viram botões) nem ênfase Markdown."""
     from nexus_intel.application.assistant import CITE
 
-    return re.sub(r"[ \t]+([,.;:!?])", r"\1", _MD.sub("", CITE.sub("", s))).strip()
+    out = re.sub(r"[ \t]{2,}", " ", _MD.sub("", CITE.sub("", s)))
+    return re.sub(r"[ \t]+([,.;:!?])", r"\1", out).strip()
 
 
 class DocumentDialog(QDialog):
@@ -138,6 +140,7 @@ class AssistantPage(Page):
     graph_focus = Signal(str)
     changed = Signal()
     speaking_changed = Signal(bool)
+    stream_text = Signal(int, str)  # (rodada, trecho): emitido pela thread da IA, tratado na interface
 
     def __init__(self, store: ProjectStore, prefs: PrefsStore | None = None, user_name: str = "",
                  client_factory: Any = LocalLlmClient) -> None:
@@ -157,6 +160,13 @@ class AssistantPage(Page):
         self._turn = 0
         self._gen: Any = None
         self.busy = False
+        self.client: Any = None
+        self._t0 = 0.0
+        self._live: Any = None  # cartão da resposta em andamento
+        self._live_text = ""
+        self._spoken_upto = 0
+        self._voice_stream = False
+        self.stream_text.connect(self._on_stream)
 
         self.engine_badge = Badge("Verificando IA…", "neutral", "server")
         self.voice_badge = Badge("", "neutral", "volume-2")
@@ -226,14 +236,20 @@ class AssistantPage(Page):
                             f"{why if not mic_ok else why_stt}")
 
     def refresh(self) -> None:
-        """Ao abrir a tela: verifica o mecanismo de IA em segundo plano."""
+        """Ao abrir a tela: verifica o mecanismo de IA e prepara tudo em segundo plano (modelo, voz e
+        reconhecimento de fala), para a primeira pergunta não esperar carregamentos."""
         try:
             client = self.client_factory(self.prefs.base_url)
         except NexusError as exc:
             self._set_engine(EngineStatus(False, self.prefs.base_url, True, detail=exc.user_message))
             return
+        self.client = client
         run_async(self, client.status, self._set_engine,
                   lambda m: self._set_engine(EngineStatus(False, self.prefs.base_url, True, detail=m)))
+        self.speaker.warm(self.prefs.voice_settings())
+        if self.mic.isEnabled() and self.transcriber is None:
+            tr = self.transcriber = stt.Transcriber(self.prefs.whisper_dir)
+            run_async(self, tr._load, lambda _m: None, lambda _e: None)  # noqa: SLF001
 
     def _set_engine(self, st: EngineStatus) -> None:
         self.status = st
@@ -247,13 +263,14 @@ class AssistantPage(Page):
             embed = pick_embed_model(st.models, self.prefs.embed_model)
             semantic = None
             if embed:
-                client = self.client_factory(self.prefs.base_url)
+                client = self.client
                 semantic = SemanticIndex(self.store, lambda texts: client.embed(embed, texts), embed,
                                          include_sensitive=self.prefs.include_sensitive)
             history = self.assistant.history if self.assistant else []
             self.assistant = Assistant(self.store, model=self.model, user_name=self.user_name, semantic=semantic,
                                        include_sensitive=self.prefs.include_sensitive)
             self.assistant.history = history
+            self._warmup()
         else:
             self.engine_badge.set_text("IA indisponível")
             self.engine_badge._color = lambda t: t.text_secondary  # noqa: SLF001
@@ -261,6 +278,16 @@ class AssistantPage(Page):
             self.engine_badge.setToolTip(f"{detail} Comandos de navegação continuam funcionando.")
             self.assistant = None
         self.engine_badge.update()
+
+    def _warmup(self) -> None:
+        """Carrega o modelo e processa as instruções agora (o servidor guarda em cache): a primeira
+        pergunta não paga esse custo."""
+        client, assistant = self.client, self.assistant
+        if assistant is None or not hasattr(client, "warmup"):
+            return
+        req = assistant.warmup_request()
+        model = self.model
+        run_async(self, lambda: client.warmup(model, req.messages, req.tools), lambda _r: None, lambda _e: None)
 
     # ============================================================== feed
     def _add(self, w: QWidget, align_right: bool = False) -> None:
@@ -330,11 +357,17 @@ class AssistantPage(Page):
         elif c.kind == "f":
             self.go_to.emit("sources")
 
-    def show_reply(self, reply: AssistantReply) -> None:
+    def show_reply(self, reply: AssistantReply, elapsed: float | None = None) -> None:
+        self._drop_live()
         card = Card(padding="md")
         head = QHBoxLayout()
         head.addWidget(text("NEXUS", "overline"))
         head.addStretch(1)
+        if elapsed is not None:
+            took = text(f"{elapsed:.1f} s".replace(".", ","), "caption")
+            took.setToolTip("Tempo da pergunta até a resposta completa. Lento? Em computadores sem placa de vídeo, "
+                            "use um modelo menor (ex.: qwen2.5:3b) em Configurar.")
+            head.addWidget(took)
         card.body.addLayout(head)
         for seg in reply.segments:
             card.add(self._segment_row(seg))
@@ -351,8 +384,51 @@ class AssistantPage(Page):
         self._add(card)
         for a in reply.actions:
             {"open_entity": self.open_entity, "go": self.go_to, "graph_focus": self.graph_focus}[a.action].emit(a.target)
-        if self.voice_toggle.isChecked():
+        if self._voice_stream:  # a voz já vinha falando enquanto o texto chegava: só completa o fim
+            self._feed_voice(final=True)
+        elif self.voice_toggle.isChecked():
             self.speaker.speak(reply.spoken_text(), self.prefs.voice_settings())
+        self._voice_stream = False
+
+    # ------------------------------------------------------- resposta em fluxo
+    def _on_stream(self, turn: int, piece: str) -> None:
+        if turn != self._turn:
+            return
+        if self._live is None:
+            self._live = Card(padding="md")
+            self._live.add(text("NEXUS", "overline"))
+            self._live_label = text("", wrap=True)
+            self._live.add(self._live_label)
+            self._add(self._live)
+            self._live_text, self._spoken_upto = "", 0
+            if self.voice_toggle.isChecked() and not self._voice_stream:
+                self._voice_stream = self.speaker.begin(self.prefs.voice_settings())
+        self._live_text += piece
+        self._live_label.setText(display_text(self._live_text))
+        self._set_thinking("Respondendo")
+        sb = self.scroll.verticalScrollBar()
+        QTimer.singleShot(0, lambda: sb.setValue(sb.maximum()))
+        if self._voice_stream:
+            self._feed_voice()
+
+    def _feed_voice(self, final: bool = False) -> None:
+        """Manda para a voz cada frase completa assim que chega (sem marcas de citação)."""
+        spoken = AssistantReply(self._live_text, [Segment(self._live_text, "plain")]).spoken_text()
+        if final:
+            self.speaker.feed(spoken[self._spoken_upto:])
+            self.speaker.finish()
+            self._spoken_upto = len(spoken)
+            return
+        ends = [m.end() for m in re.finditer(r"[.!?…:;](?=\s)", spoken)]
+        if ends and ends[-1] > self._spoken_upto:
+            self.speaker.feed(spoken[self._spoken_upto:ends[-1]] + " ")
+            self._spoken_upto = ends[-1]
+
+    def _drop_live(self) -> None:
+        if self._live is not None:
+            holder = self._live.parentWidget()
+            (holder or self._live).deleteLater()
+            self._live = None
 
     def _note(self, message: str, tone: str = "neutral") -> None:
         card = Card(padding="md")
@@ -382,6 +458,9 @@ class AssistantPage(Page):
             return
         self._turn += 1
         turn = self._turn
+        self._t0 = time.monotonic()
+        self.speaker.stop()
+        self._voice_stream = False
         try:
             self._gen = self.assistant.turn(question, document=document, source_id=source_id,
                                             on_tool=lambda n: self._set_thinking(f"Consultando o projeto ({n})"))
@@ -393,9 +472,10 @@ class AssistantPage(Page):
         self._send(req, turn)
 
     def _send(self, req: Any, turn: int) -> None:
-        client = self.client_factory(self.prefs.base_url)
+        client = self.client or self.client_factory(self.prefs.base_url)
         model = self.model
-        run_async(self, lambda: client.chat(model, req.messages, req.tools),
+        emit = self.stream_text.emit  # chamado da thread da IA; o Qt entrega na thread da interface
+        run_async(self, lambda: client.chat(model, req.messages, req.tools, on_text=lambda p: emit(turn, p)),
                   lambda msg: self._on_message(msg, turn), lambda m: self._on_fail(m, turn))
 
     def _on_message(self, msg: Any, turn: int) -> None:
@@ -405,25 +485,36 @@ class AssistantPage(Page):
             req = self._gen.send(msg)
         except StopIteration as stop:
             self._busy(False)
-            self.show_reply(stop.value)
+            self.show_reply(stop.value, time.monotonic() - self._t0)
             if stop.value.suggestions:
                 self.changed.emit()
             return
         except NexusError as exc:
             self._on_fail(exc.user_message, turn)
             return
+        if self._live is not None:  # rodada de ferramentas: o texto parcial dá lugar à próxima rodada
+            self._live_text = ""
+            self._live_label.setText("")
         self._send(req, turn)
 
     def _on_fail(self, message: str, turn: int) -> None:
         if turn != self._turn:
             return
         self._busy(False)
+        self._drop_live()
+        if self._voice_stream:
+            self.speaker.stop()
+            self._voice_stream = False
         self._note(message, "danger")
 
     def cancel(self) -> None:
         self._turn += 1
         self._busy(False)
         self._set_thinking("")
+        self._drop_live()
+        if self._voice_stream:
+            self.speaker.stop()
+            self._voice_stream = False
 
     def _busy(self, on: bool) -> None:
         self.busy = on
@@ -479,7 +570,7 @@ class AssistantPage(Page):
             audio_data = self.recorder.stop()
             self._set_thinking("Transcrevendo")
             if self.transcriber is None:
-                self.transcriber = stt.Transcriber(self.prefs.whisper_dir)
+                self.transcriber = stt.Transcriber(self.prefs.whisper_dir)  # normalmente já pré-carregado
             tr = self.transcriber
             run_async(self, lambda: tr.transcribe(audio_data), self._on_transcript,
                       lambda m: (self._set_thinking(""), notify(self, m, "danger")))

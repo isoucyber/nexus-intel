@@ -77,23 +77,67 @@ def server():
     httpd.shutdown()
 
 
-def test_status_chat_and_embed_against_compatible_server(server):
+def test_compatible_server_chat_stream_and_embed(server):
     _httpd, url = server
+    sse = "".join(f"data: {json.dumps(e)}\n\n" for e in [
+        {"choices": [{"delta": {"content": "Olá, "}}]},
+        {"choices": [{"delta": {"content": "Daniel."}}]},
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "x", "function": {"name": "buscar",
+                                                                                 "arguments": "{\"consulta\""}}]}}]},
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": ": \"a\"}"}}]}}]},
+    ]) + "data: [DONE]\n\n"
     _Handler.routes = {
         "/v1/models": (200, {"data": [{"id": "qwen2.5:7b"}, {"id": "bge-m3"}]}),
-        "/api/version": (200, {"version": "0.9"}),
-        "/v1/chat/completions": (200, {"choices": [{"message": {"content": None, "tool_calls": [
-            {"id": "x", "type": "function", "function": {"name": "buscar", "arguments": "{\"consulta\": \"a\"}"}}]}}]}),
+        "/v1/chat/completions": (200, sse.encode()),
         "/v1/embeddings": (200, {"data": [{"index": 1, "embedding": [0, 1]}, {"index": 0, "embedding": [1, 0]}]}),
     }
     c = LocalLlmClient(url)
     st = c.status()
-    assert st.available and st.kind == "Ollama" and st.models == ["bge-m3", "qwen2.5:7b"] and st.local
-    msg = c.chat("qwen2.5:7b", [{"role": "user", "content": "oi"}], tools=[{"type": "function"}])
-    assert msg.tool_calls[0].arguments == {"consulta": "a"}
+    assert st.available and st.kind == "Servidor compatível" and not c.native and st.models == ["bge-m3", "qwen2.5:7b"]
+    pieces = []
+    msg = c.chat("qwen2.5:7b", [{"role": "user", "content": "oi"}], tools=[{"type": "function"}], on_text=pieces.append)
+    assert "".join(pieces) == "Olá, Daniel." and msg.content == "Olá, Daniel."
+    assert msg.tool_calls[0].name == "buscar" and msg.tool_calls[0].arguments == {"consulta": "a"}
     sent = [s for s in _Handler.seen if s[1] == "/v1/chat/completions"][0][2]
-    assert sent["tool_choice"] == "auto" and sent["stream"] is False
+    assert sent["tool_choice"] == "auto" and sent["stream"] is True
     assert c.embed("bge-m3", ["a", "b"]) == [[1.0, 0.0], [0.0, 1.0]]
+
+
+def test_ollama_native_keeps_model_loaded_and_streams(server):
+    _httpd, url = server
+    nd = "\n".join(json.dumps(e) for e in [
+        {"message": {"content": "Abrindo "}, "done": False},
+        {"message": {"content": "o grafo."}, "done": False},
+        {"message": {"content": "", "tool_calls": [{"function": {"name": "abrir_tela", "arguments": {"tela": "grafo"}}}]},
+         "done": True},
+    ]) + "\n"
+    _Handler.routes = {"/v1/models": (200, {"data": [{"id": "qwen2.5:7b"}]}), "/api/version": (200, {"version": "0.9"}),
+                       "/api/chat": (200, nd.encode())}
+    c = LocalLlmClient(url)
+    assert c.status().kind == "Ollama" and c.native
+    pieces = []
+    history = [{"role": "user", "content": "abre o grafo"},
+               {"role": "assistant", "content": "", "tool_calls": [
+                   {"id": "1", "type": "function", "function": {"name": "buscar", "arguments": "{\"consulta\": \"x\"}"}}]},
+               {"role": "tool", "tool_call_id": "1", "name": "buscar", "content": "{}"}]
+    msg = c.chat("qwen2.5:7b", history, tools=[{"type": "function"}], on_text=pieces.append)
+    assert "".join(pieces) == "Abrindo o grafo." and msg.tool_calls[0].arguments == {"tela": "grafo"}
+    sent = [s for s in _Handler.seen if s[1] == "/api/chat"][0][2]
+    assert sent["keep_alive"] == "30m" and sent["options"]["num_ctx"] >= 8192 and sent["stream"] is True
+    assert sent["messages"][1]["tool_calls"][0]["function"]["arguments"] == {"consulta": "x"}  # objeto, não texto
+    assert sent["messages"][2]["tool_name"] == "buscar"
+
+
+def test_tool_call_written_as_text_is_never_streamed_to_screen(server):
+    _httpd, url = server
+    sse = "".join(f"data: {json.dumps({'choices': [{'delta': {'content': p}}]})}\n\n"
+                  for p in ["<tool", "_call>{\"name\": \"buscar\", \"arguments\": {}}", "</tool_call>"])
+    _Handler.routes = {"/v1/models": (200, {"data": [{"id": "m"}]}), "/v1/chat/completions": (200, sse.encode())}
+    c = LocalLlmClient(url)
+    c.status()
+    pieces = []
+    msg = c.chat("m", [{"role": "user", "content": "x"}], on_text=pieces.append)
+    assert pieces == [] and msg.tool_calls[0].name == "buscar"
 
 
 def test_redirects_are_not_followed(server):
@@ -158,3 +202,83 @@ def test_installed_voices_lists_only_complete_pairs(tmp_path):
     (tmp_path / "pt_BR-cadu-medium.onnx.json").write_text("{}")
     (tmp_path / "pt_BR-jeff-medium.onnx").write_bytes(b"x")  # sem .json
     assert tts.installed_voices(tmp_path) == ["pt_BR-cadu-medium"]
+
+
+# ------------------------------------------------------------------ voz (0.4: Kokoro e fluxo)
+def _venv_file(env, name):
+    import os
+
+    p = env / ("Scripts" if os.name == "nt" else "bin") / (f"{name}.exe" if os.name == "nt" else name)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"")
+    return p
+
+
+def test_piper_installed_by_script_is_found(tmp_path):
+    """Bug da primeira versão: o Piper instalado em voz/piper-venv não era achado e a voz caía no Windows."""
+    exe = _venv_file(tmp_path / "piper-venv", "piper")
+    assert tts.piper_command("", tmp_path) == [str(exe)]
+
+
+def test_kokoro_is_preferred_when_installed(tmp_path):
+    assert tts.kokoro_files(tmp_path) is None
+    py = _venv_file(tmp_path / "kokoro-venv", "python")
+    (tmp_path / "kokoro").mkdir()
+    (tmp_path / "kokoro" / "model.onnx").write_bytes(b"x")
+    (tmp_path / "kokoro" / "voices-ptbr.npz").write_bytes(b"x")
+    assert tts.kokoro_files(tmp_path)[0] == py
+    eng = tts.choose_engine(tts.VoiceSettings(root=str(tmp_path)))
+    assert isinstance(eng, tts.KokoroEngine) and eng.voice == "pm_alex"
+    ok, desc = tts.describe(tts.VoiceSettings(root=str(tmp_path), kokoro_voice="pm_santa"))
+    assert ok and "Santa" in desc
+
+
+def test_old_prefs_with_metallic_timbre_are_reset():
+    from nexus_intel.ui.ai_common import AiPrefs
+
+    old = AiPrefs.from_dict({"voice": {"timbre": True, "engine": "windows"}})
+    assert not old.voice.timbre and old.voice.engine == "auto"
+    new = AiPrefs.from_dict({"version": 2, "voice": {"timbre": True, "engine": "piper"}})
+    assert new.voice.timbre and new.voice.engine == "piper"
+
+
+def test_split_for_speech_starts_short_and_keeps_medium_chunks():
+    text = ("Helena é contadora. Ela é sócia da Vértice Importações e trabalha na Aurora Logística. "
+            "Interpreto que a data de nascimento merece revisão, porque há relatos conflitantes. Quer ver o grafo?")
+    chunks = tts.split_for_speech(text)
+    assert chunks[0] == "Helena é contadora."  # o primeiro trecho toca logo
+    assert " ".join(chunks) == " ".join(text.split()) and all(len(c) <= 260 for c in chunks)
+    long = "palavra, " * 80
+    assert all(len(c) <= 260 for c in tts.split_for_speech(long))
+
+
+def test_speaker_plays_first_chunk_before_synthesizing_the_rest(monkeypatch):
+    import time as _time
+
+    events = []
+
+    class Slow:
+        name, rate, chunked = "teste", 8000, True
+
+        def synthesize(self, text):
+            events.append(("sintetiza", text))
+            _time.sleep(0.05)
+            return np.zeros(80, np.int16), 8000
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(tts, "choose_engine", lambda s: Slow())
+    sp = tts.Speaker()
+    monkeypatch.setattr(sp.player, "play", lambda pcm, rate: events.append(("toca", pcm.size)))
+    assert sp.begin(tts.VoiceSettings())
+    sp.feed("Primeira frase completa. Segunda fra")
+    sp.feed("se chegando aos poucos. ")
+    sp.finish()
+    deadline = _time.time() + 5
+    while sp.speaking and _time.time() < deadline:
+        _time.sleep(0.02)
+    said = [e[1] for e in events if e[0] == "sintetiza"]
+    assert said == ["Primeira frase completa.", "Segunda frase chegando aos poucos."]
+    assert events.index(("toca", 80)) < events.index(("sintetiza", said[1])) + 2
+    assert [e[0] for e in events].count("toca") == 2
