@@ -55,6 +55,44 @@ Também há uma versão portátil (`NexusIntel-portatil-<versão>.zip`): descomp
 | Ctrl+G | Grafo |
 | Ctrl+W | Fechar aba |
 | Ctrl+L | Bloquear |
+| Ctrl+J | Assistente de IA |
+| Ctrl+Shift+Espaço | Falar com o assistente (liga/desliga o microfone) |
+
+## Assistente de IA e voz (0.4, em desenvolvimento)
+
+O **NEXUS** é um assistente de análise que roda **no seu computador**. Você pergunta ou dá
+ordens, por texto ou voz, por exemplo: “quem é Helena Prado?”, “há ligação entre a Aurora e a
+Vértice?”, “abre a ficha da Helena”, “mostra a Aurora no grafo”, “lê este documento”.
+
+- **Cada frase leva um selo:** *Documentado* (cita uma fonte do projeto, com link), *Interpretação
+  da IA* ou *Não verificado*. Citações inventadas pelo modelo são removidas.
+- **Nada entra no projeto sem você:** quando a IA quer criar ou ligar algo, ela registra uma
+  sugestão em **Sugestões e aprovações**; aprovar ou rejeitar fica na auditoria.
+- **Busca semântica:** encontra pelo significado (“empresas de transporte”).
+- **Voz:** responde em voz alta com voz masculina neural (Piper, voz *cadu*) e um timbre opcional
+  de “assistente digital”; ouve pelo microfone só quando você manda (botão ou Ctrl+Shift+Espaço).
+  Sem o Piper, usa a voz do Windows.
+
+### Como ligar
+
+1. Instale o [Ollama](https://ollama.com) e baixe os modelos (uma vez, com internet):
+   ```powershell
+   ollama pull qwen2.5:7b
+   ollama pull bge-m3
+   ```
+   Em computadores modestos, use `qwen2.5:3b`. LM Studio e llama.cpp também funcionam
+   (IA e análises → Configurar → Endereço).
+2. Voz e microfone (opcional, rodando a partir do código):
+   ```powershell
+   pip install -e ".[voz]"
+   python tools/baixar_voz.py --instalar-piper
+   ```
+   O script baixa a voz e o modelo de fala numa versão fixa e confere o SHA-256 de cada arquivo.
+3. No projeto: **Inteligência → IA e análises** (Ctrl+J).
+
+Só endereços deste computador são aceitos para a IA; observações privadas nunca vão para ela;
+dados sensíveis (saúde, religião) só se você permitir. Decisões e limites:
+[ADR-0004](docs/adr/0004-assistente-ia-e-voz.md).
 
 ## Onde ficam os dados
 
@@ -110,7 +148,8 @@ ou rastreamento de pessoas. Ao tratar dados pessoais, você é responsável por 
 | **0.1** (esta) | Núcleo: segurança, projetos, entidades, afirmações, fontes, relações, busca, grafo, qualidade, histórico |
 | 0.2 | Anexos cifrados, mapa offline (Veneza sem internet), linha do tempo, importação/exportação, backup automático |
 | 0.3 | IA local/externa com citações verificadas, busca semântica, sugestões com aprovação |
-| 0.4+ | Métricas de rede, caminhos, globo 3D, OCR, relatórios PDF, editor de temas |
+| 0.4 (em desenvolvimento) | Assistente de IA local com citações conferidas, sugestões com aprovação, busca semântica e voz |
+| 0.5+ | Revisor de qualidade e hipóteses concorrentes com IA, métricas de rede, globo 3D, OCR, relatórios PDF |
 
 Decisões técnicas estão registradas em [docs/adr](docs/adr).
 

@@ -2,6 +2,22 @@
 
 Formato baseado em Keep a Changelog; versões seguem SemVer.
 
+## [Não lançado] — 0.4 (branch `dev`)
+### Adicionado
+- Assistente de IA local (ADR-0004): cliente compatível com OpenAI para Ollama, LM Studio e llama.cpp,
+  restrito a endereços deste computador; ferramentas só de leitura (buscar, ficha, caminho entre entidades,
+  fontes, qualidade, notas); citações conferidas (`[c:]`, `[r:]`, `[f:]`, `[e:]`, `[n:]`) com remoção das
+  inventadas; selo por frase (Documentado, Interpretação da IA, Não verificado); atribuição conferida.
+- Comandos de navegação por texto ou voz, inclusive sem IA ("abre a ficha da …", "mostra … no grafo").
+- Sugestões e aprovações: tabela `suggestion` (migração `0003_ia`), aprovação na mesma transação que aplica,
+  rejeição com motivo, tudo na auditoria; "Ler documento" com trecho conferido literalmente.
+- Busca semântica com índice de vetores incremental no banco cifrado (tabela `embedding`, fora do `.nexus`).
+- Voz: Piper como programa separado (voz masculina `pt_BR-cadu-medium`), timbre de assistente digital,
+  voz do Windows como alternativa; microfone sob comando e reconhecimento local (faster-whisper);
+  `tools/baixar_voz.py` com revisão fixa e SHA-256. Extra opcional `[voz]`.
+- Atalhos Ctrl+J (assistente) e Ctrl+Shift+Espaço (falar). Contador de sugestões pendentes no menu.
+- Modelo de ameaças: adendo sobre IA e voz (cenários 11–17).
+
 ## [0.3.4] — 2026-11-10
 ### Adicionado
 - Perfis locais isolados (`ProfileManager`): pasta, cofre, banco e projetos por perfil, cifrados com a chave
